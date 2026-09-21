@@ -54,6 +54,13 @@ h2 { font-size: 17px; }
 
 fieldset { border: 0; padding: 0; margin: 0 0 25px; }
 legend { width: 100%; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 1px solid var(--border); color: #b8c0b6; font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+.dogbone-toggle { display: flex; align-items: center; gap: 10px; margin: 0 0 25px; padding: 11px 12px; border: 1px solid #303930; border-radius: 5px; color: #c8cec5; background: #0d120e; cursor: pointer; transition: border-color .18s, color .18s; }
+.dogbone-toggle:hover { border-color: #465046; color: var(--text); }
+.dogbone-toggle input { width: 15px; height: 15px; flex: 0 0 auto; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.dogbone-toggle input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dogbone-toggle span { display: grid; gap: 2px; }
+.dogbone-toggle strong { font-size: 12px; font-weight: 650; }
+.dogbone-toggle small { color: var(--muted); font-size: 9px; }
 .field-row { display: grid; grid-template-columns: 1fr 112px; align-items: center; gap: 12px; margin-top: 12px; }
 .field-row label { color: #c8cec5; font-size: 12px; }
 .field-row label span { float: right; color: #5f695e; font: 10px ui-monospace, monospace; }

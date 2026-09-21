@@ -116,6 +116,7 @@ test("missing optional values retain the established inch-derived defaults", () 
   assert.equal(spec.bottom_slot_depth, 6.35);
   assert.equal(spec.bottom_slot_offset, 12.7);
   assert.equal(spec.cutter_diameter, 3.175);
+  assert.equal(spec.use_dogbones, true);
 });
 
 test("invalid slot placement and depth are rejected", () => {
@@ -143,6 +144,7 @@ test("DXF declares units, CAM layers, bulges, and saved settings", () => {
   assert.ok(dxf.includes("999\nunits=mm"));
   assert.ok(dxf.includes("999\nwidth_mm=450"));
   assert.ok(dxf.includes("999\nbottom_slot_offset_mm=12"));
+  assert.ok(dxf.includes("999\nuse_dogbones=true"));
   assert.ok(dxf.endsWith("0\nEOF\n"));
 });
 
@@ -210,6 +212,22 @@ test("zero clearance and larger cutters alter dogbones correctly", () => {
   assert.equal(defaultDogbone.radius, 3.175 / 2);
   assert.equal(largerDogbone.radius, 6.35 / 2);
   assert.notDeepEqual(buildLayout(DEFAULT).parts[0].profile, larger.parts[0].profile);
+});
+
+test("dogbones can be disabled without changing finger joints", () => {
+  const layout = buildLayout({ ...DEFAULT, use_dogbones: false });
+  assert.equal(layout.spec.use_dogbones, false);
+  assert.equal(layout.manufacturing.dogbones_enabled, false);
+  assert.ok(layout.parts.slice(0, 4).every((part) =>
+    !part.operations.some((operation) => operation.type === "dogbone")
+  ));
+  const cutPaths = layout.entities.filter((entity) =>
+    entity.type === "polyline" && entity.layer === "CUT_OUTSIDE"
+  );
+  assert.ok(cutPaths.slice(0, 4).every((entity) => entity.bulges.every((bulge) => bulge === 0)));
+  const dxf = layoutToDxf(layout);
+  assert.ok(dxf.includes("999\nuse_dogbones=false"));
+  assert.ok(!dxf.includes("\n42\n"));
 });
 
 test("invalid drawer dimensions are rejected", () => {

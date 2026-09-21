@@ -49,6 +49,12 @@ export function validateSpec(values) {
     spec[name] = value;
   }
 
+  const rawDogboneSetting = values.use_dogbones ?? true;
+  if (rawDogboneSetting !== true && rawDogboneSetting !== false) {
+    throw new Error("use dogbones must be true or false");
+  }
+  spec.use_dogbones = rawDogboneSetting;
+
   const rawOffset = values.bottom_slot_offset ?? spec.wall_thickness;
   const bottomSlotOffset = typeof rawOffset === "string" && rawOffset.trim() === ""
     ? Number.NaN
@@ -296,7 +302,7 @@ function dogboneOutline(points, radius, offset = 0, maximumArcStep = Math.PI / 8
   return { outline, bulges, operations };
 }
 
-function fingeredPanel({ x, y, width, height, verticalMode, fingerSize, jointDepth, label, groove, grooveDepth, cutterDiameter, fingerClearance }) {
+function fingeredPanel({ x, y, width, height, verticalMode, fingerSize, jointDepth, label, groove, grooveDepth, cutterDiameter, fingerClearance, useDogbones }) {
   const corners = [
     [[0, 0], [width, 0], "plain", 0],
     [[width, 0], [width, height], verticalMode, 0],
@@ -310,15 +316,17 @@ function fingeredPanel({ x, y, width, height, verticalMode, fingerSize, jointDep
   }
 
   const squareOutline = cleanPolyline(outline, { closed: true });
-  const dogbones = dogboneOutline(squareOutline, cutterDiameter / 2, fingerClearance);
-  const translatedOutline = dogbones.outline.map(([px, py]) => [px + x, py + y]);
-  const operations = [...dogbones.operations];
+  const routedOutline = useDogbones
+    ? dogboneOutline(squareOutline, cutterDiameter / 2, fingerClearance)
+    : { outline: squareOutline, bulges: squareOutline.map(() => 0), operations: [] };
+  const translatedOutline = routedOutline.outline.map(([px, py]) => [px + x, py + y]);
+  const operations = [...routedOutline.operations];
   const entities = [{
     type: "polyline",
     layer: "CUT_OUTSIDE",
     closed: true,
     points: translatedOutline,
-    bulges: dogbones.bulges,
+    bulges: routedOutline.bulges,
   }];
 
   if (groove) {
@@ -355,7 +363,7 @@ function fingeredPanel({ x, y, width, height, verticalMode, fingerSize, jointDep
     width,
     height,
     thickness: jointDepth,
-    profile: dogbones.outline,
+    profile: routedOutline.outline,
     operations,
     layout_origin: [x, y],
     entities,
@@ -399,6 +407,7 @@ export function buildLayout(values) {
     grooveDepth: pocketDepth,
     cutterDiameter: spec.cutter_diameter,
     fingerClearance: spec.finger_clearance,
+    useDogbones: spec.use_dogbones,
   };
   const placements = [
     fingeredPanel({
@@ -492,6 +501,7 @@ export function buildLayout(values) {
     parts: placements.map(({ entities: _entities, ...part }) => part),
     bounds: entityBounds(entities),
     manufacturing: {
+      dogbones_enabled: spec.use_dogbones,
       dogbone_diameter: roundTo(spec.cutter_diameter, 3),
       finger_clearance: roundTo(spec.finger_clearance, 3),
       pocket_depth: pocketDepth,

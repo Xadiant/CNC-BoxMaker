@@ -21,6 +21,14 @@
         </div>
 
         <form id="drawerForm" autocomplete="off">
+          <label class="dogbone-toggle" for="use_dogbones">
+            <input id="use_dogbones" name="use_dogbones" type="checkbox" checked />
+            <span>
+              <strong>Use dogbones</strong>
+              <small>Add cutter reliefs to inside corners</small>
+            </span>
+          </label>
+
           <fieldset>
             <legend>Overall size</legend>
             <div class="field-row">
@@ -92,7 +100,7 @@
         </button>
         <button id="importSettingsButton" class="import-button" type="button">Load settings from DXF</button>
         <input id="dxfSettingsFile" type="file" accept=".dxf,application/dxf" hidden />
-        <p class="fine-print">Exports include these settings for later reload. Finger clearance is added to each socket's total width and depth, split evenly between its two side faces; it also shifts dogbones back toward the corner at 45°. Slot offset is measured from the panel bottom to the lower edge of the groove. Extra is added to the requested slot depth and width to calculate the routed pocket.</p>
+        <p class="fine-print">Exports include these settings for later reload. Finger clearance is added to each socket's total width and depth, split evenly between its two side faces; when dogbones are enabled, it also shifts them back toward the corner at 45°. Slot offset is measured from the panel bottom to the lower edge of the groove. Extra is added to the requested slot depth and width to calculate the routed pocket.</p>
 
         <fieldset class="piece-drawing">
           <legend>Pieces to draw <span id="pieceDrawingCount">5 of 5</span></legend>

@@ -48,8 +48,8 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
 - The calculated pocket depth is the requested bottom-slot depth plus the slot
   extra; the requested depth remains the captured bottom's engagement distance.
 - Bottom slot offset controls the distance from the bottom edge of each wall panel to the lower edge of the captured-bottom groove.
-- Dogbone reliefs are built directly into the `CUT_OUTSIDE` part profiles as
-  circular arcs. Their diameter follows the cutter diameter input, which
+- Optional dogbone reliefs are built directly into the `CUT_OUTSIDE` part profiles
+  as circular arcs. They are enabled by default, and their diameter follows the cutter diameter input, which
   defaults to a 1/8-inch (3.175 mm) bit. Finger clearance defaults to 0.01 inch
   (0.254 mm), is added to each socket's total width and depth, and shifts the
   dogbone center the same distance back toward the corner along its 45-degree

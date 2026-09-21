@@ -3,6 +3,7 @@ import { layoutToDxf } from "./dxf.js";
 
 const form = document.querySelector("#drawerForm");
 const inputs = [...form.querySelectorAll('input[type="number"]')];
+const dogboneCheckbox = document.querySelector("#use_dogbones");
 const pieceCheckboxes = [...document.querySelectorAll("[data-draw-piece]")];
 const pieceDrawingCount = document.querySelector("#pieceDrawingCount");
 const modelCanvas = document.querySelector("#modelCanvas");
@@ -66,7 +67,10 @@ const drawingView = { scale: 1, panX: 0, panY: 0, fittedScale: 1 };
 
 function readSpec() {
   const factor = displayUnit === "in" ? 25.4 : 1;
-  return Object.fromEntries(inputs.map((input) => [input.name, Number(input.value) * factor]));
+  return {
+    ...Object.fromEntries(inputs.map((input) => [input.name, Number(input.value) * factor])),
+    use_dogbones: dogboneCheckbox.checked,
+  };
 }
 
 function selectedPieceNames() {
@@ -124,7 +128,15 @@ function parseDxfSettings(text) {
     if (!Number.isFinite(value)) throw new Error(`The DXF is missing ${input.name.replaceAll("_", " ")}`);
     values[input.name] = value;
   }
-  return { units: importedUnit, values };
+  const savedDogboneSetting = metadata.use_dogbones;
+  if (savedDogboneSetting !== undefined && savedDogboneSetting !== "true" && savedDogboneSetting !== "false") {
+    throw new Error("The DXF has an invalid saved dogbone setting");
+  }
+  return {
+    units: importedUnit,
+    values,
+    useDogbones: savedDogboneSetting === undefined ? true : savedDogboneSetting === "true",
+  };
 }
 
 function formatInput(value) {
@@ -175,7 +187,9 @@ async function updateGeometry(successMessage = "Geometry ready") {
     downloadButton.disabled = false;
     dimensionCard.textContent = `${measure(spec.width).replace(` ${displayUnit}`, "")} × ${measure(spec.depth).replace(` ${displayUnit}`, "")} × ${measure(spec.height)}`;
     document.querySelector("#pocketDepth").textContent = measureFixed(result.manufacturing.pocket_depth);
-    document.querySelector("#dogboneSize").textContent = measure(result.manufacturing.dogbone_diameter);
+    document.querySelector("#dogboneSize").textContent = result.manufacturing.dogbones_enabled
+      ? measure(result.manufacturing.dogbone_diameter)
+      : "Off";
     fitDrawing();
     drawModel();
     setStatus(successMessage, "ready");
@@ -1016,6 +1030,7 @@ dxfSettingsFile.addEventListener("change", async () => {
     const imported = parseDxfSettings(await file.text());
     clearTimeout(updateTimer);
     showMillimetreValues(imported.values, imported.units);
+    dogboneCheckbox.checked = imported.useDogbones;
     spec = readSpec();
     await updateGeometry(`Settings loaded from ${file.name}`);
   } catch (error) {
@@ -1026,6 +1041,7 @@ dxfSettingsFile.addEventListener("change", async () => {
 });
 
 inputs.forEach((input) => input.addEventListener("input", scheduleUpdate));
+dogboneCheckbox.addEventListener("change", scheduleUpdate);
 pieceCheckboxes.forEach((checkbox) => checkbox.addEventListener("change", () => {
   pieceDrawingCount.textContent = `${selectedPieceNames().size} of ${pieceCheckboxes.length}`;
   drawModel();

@@ -41,6 +41,7 @@ export function layoutToDxf(layout, units = "mm") {
   for (const name of DXF_SETTING_NAMES) {
     metadata.push(pair(999, `${name}_mm=${significant(storedSpec[name])}`));
   }
+  metadata.push(pair(999, `use_dogbones=${storedSpec.use_dogbones !== false}`));
 
   const chunks = [
     pair(0, "SECTION"), pair(2, "HEADER"), pair(9, "$ACADVER"), pair(1, "AC1024"),
