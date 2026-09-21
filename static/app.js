@@ -448,6 +448,22 @@ function finishPartMesh(mesh) {
   return mesh;
 }
 
+function faceNormal(points) {
+  if (points.length < 3) return [0, 0, 0];
+  const first = points[0];
+  const second = points[1];
+  const third = points[2];
+  const a = second.map((value, axis) => value - first[axis]);
+  const b = third.map((value, axis) => value - first[axis]);
+  const normal = [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const length = Math.hypot(...normal) || 1;
+  return normal.map((value) => value / length);
+}
+
 function generatePartMesh(part, diagnostic = false) {
   const profile = diagnostic ? part.diagnostic_profile ?? part.profile : part.profile;
   const grooves = part.operations.filter((operation) => ["groove", "hidden_finger_pocket"].includes(operation.type));
@@ -597,20 +613,19 @@ function preparePartMeshes(parts) {
     const fillVertices = [];
     const lineVertices = [];
     const color = partColors[part.name] || "#bd8a4d";
-    const isBottom = part.name === "BOTTOM";
     for (const face of part.mesh.faces) {
-      const shade = face.surface === "edge" ? -34 : isBottom ? 2 : 10;
-      const channels = rgbChannels(color, shade);
+      const channels = rgbChannels(color);
+      const normal = faceNormal(face.points);
       for (const triangle of face.triangles) {
         for (const index of triangle) {
-          fillVertices.push(...face.points[index], ...channels, 1);
+          fillVertices.push(...face.points[index], ...channels, 1, ...normal);
         }
       }
     }
-    if (isBottom) {
+    if (part.name === "BOTTOM") {
       for (const line of part.mesh.lines) {
         const channels = rgbChannels(line.color);
-        for (const point of line.points) lineVertices.push(...point, ...channels, 1);
+        for (const point of line.points) lineVertices.push(...point, ...channels, 1, 0, 0, 1);
       }
     }
     part.renderData = {
@@ -632,9 +647,9 @@ function uploadPartMeshes(parts) {
     gl.bufferData(gl.ARRAY_BUFFER, part.renderData.lineVertices, gl.STATIC_DRAW);
     part.renderMesh = {
       fillBuffer,
-      fillCount: part.renderData.fillVertices.length / 7,
+      fillCount: part.renderData.fillVertices.length / 10,
       lineBuffer,
-      lineCount: part.renderData.lineVertices.length / 7,
+      lineCount: part.renderData.lineVertices.length / 10,
     };
     delete part.renderData;
   }
@@ -886,6 +901,10 @@ function drawModel() {
       ...originClip, 1,
     ]);
   };
+  const partNormalMatrix = (part) => new Float32Array(
+    [part.assembly.u_axis, part.assembly.v_axis, part.assembly.thickness_axis]
+      .flatMap((basis) => rotatePoint(basis)),
+  );
 
   const faces = [];
   const modelLines = [];
@@ -923,6 +942,7 @@ function drawModel() {
     parts,
     diagnosticMode ? .14 : 1,
     partMatrix,
+    partNormalMatrix,
     visibleFaces,
     modelLines,
     cw,
@@ -1004,21 +1024,30 @@ function createModelRenderer(canvas) {
   const vertexShader = compileShader(gl, gl.VERTEX_SHADER, `
     attribute vec3 a_position;
     attribute vec4 a_color;
+    attribute vec3 a_normal;
     uniform mat4 u_matrix;
+    uniform mat3 u_normal_matrix;
     uniform float u_alpha;
     uniform float u_depth_bias;
     varying vec4 v_color;
+    varying vec3 v_normal;
     void main() {
       gl_Position = u_matrix * vec4(a_position, 1.0);
       gl_Position.z += u_depth_bias;
       v_color = vec4(a_color.rgb, a_color.a * u_alpha);
+      v_normal = normalize(u_normal_matrix * a_normal);
     }
   `);
   const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, `
     precision mediump float;
     varying vec4 v_color;
+    varying vec3 v_normal;
+    uniform float u_lighting;
     void main() {
-      gl_FragColor = v_color;
+      vec3 lightDirection = normalize(vec3(-0.45, -0.65, 0.75));
+      float diffuse = max(dot(normalize(v_normal), lightDirection), 0.0);
+      float brightness = mix(1.0, 0.48 + 0.52 * diffuse, u_lighting);
+      gl_FragColor = vec4(v_color.rgb * brightness, v_color.a);
     }
   `);
   const program = gl.createProgram();
@@ -1034,9 +1063,12 @@ function createModelRenderer(canvas) {
     buffer: gl.createBuffer(),
     position: gl.getAttribLocation(program, "a_position"),
     color: gl.getAttribLocation(program, "a_color"),
+    normal: gl.getAttribLocation(program, "a_normal"),
     matrix: gl.getUniformLocation(program, "u_matrix"),
+    normalMatrix: gl.getUniformLocation(program, "u_normal_matrix"),
     alpha: gl.getUniformLocation(program, "u_alpha"),
     depthBias: gl.getUniformLocation(program, "u_depth_bias"),
+    lighting: gl.getUniformLocation(program, "u_lighting"),
   };
 }
 
@@ -1047,17 +1079,19 @@ function rgbChannels(hex, adjustment = 0) {
   );
 }
 
-function renderSolidModel(parts, partAlpha, partMatrix, faces, modelLines, width, height, maxDimension, ratio) {
+function renderSolidModel(parts, partAlpha, partMatrix, partNormalMatrix, faces, modelLines, width, height, maxDimension, ratio) {
   if (!modelRenderer) modelRenderer = createModelRenderer(modelCanvas);
-  const { gl, program, buffer, position, color, matrix, alpha, depthBias } = modelRenderer;
+  const {
+    gl, program, buffer, position, color, normal, matrix, normalMatrix, alpha, depthBias, lighting,
+  } = modelRenderer;
   const depthRange = maxDimension * 4;
   const toClip = (point, depthBias = 0) => [
     point.x / width * 2 - 1,
     1 - point.y / height * 2,
     -point.depth / depthRange + depthBias,
   ];
-  const pushVertex = (target, point, channels, alpha = 1, depthBias = 0) => {
-    target.push(...toClip(point, depthBias), ...channels, alpha);
+  const pushVertex = (target, point, channels, alpha = 1, depthBias = 0, surfaceNormal = [0, 0, 1]) => {
+    target.push(...toClip(point, depthBias), ...channels, alpha, ...surfaceNormal);
   };
   const fillVertices = [];
   const transparentVertices = [];
@@ -1065,12 +1099,14 @@ function renderSolidModel(parts, partAlpha, partMatrix, faces, modelLines, width
   const transparentLineVertices = [];
 
   for (const face of faces) {
-    const shade = face.surface === "edge" ? -34 : face.isBottom ? 2 : 10;
-    const channels = rgbChannels(face.color, shade);
+    const channels = rgbChannels(face.color);
+    const surfaceNormal = rotatePoint(faceNormal(face.points));
     const alpha = face.alpha ?? 1;
     const target = alpha < 1 ? transparentVertices : fillVertices;
     for (const triangle of face.triangles ?? triangulatePolygon(face.projected)) {
-      for (const index of triangle) pushVertex(target, face.projected[index], channels, alpha);
+      for (const index of triangle) {
+        pushVertex(target, face.projected[index], channels, alpha, 0, surfaceNormal);
+      }
     }
   }
   for (const line of modelLines) {
@@ -1091,26 +1127,32 @@ function renderSolidModel(parts, partAlpha, partMatrix, faces, modelLines, width
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   gl.enableVertexAttribArray(position);
   gl.enableVertexAttribArray(color);
-  gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 28, 0);
-  gl.vertexAttribPointer(color, 4, gl.FLOAT, false, 28, 12);
+  gl.enableVertexAttribArray(normal);
+  gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 40, 0);
+  gl.vertexAttribPointer(color, 4, gl.FLOAT, false, 40, 12);
+  gl.vertexAttribPointer(normal, 3, gl.FLOAT, false, 40, 28);
   gl.uniform1f(alpha, 1);
   gl.uniform1f(depthBias, 0);
 
   const bindBuffer = (vertexBuffer) => {
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 28, 0);
-    gl.vertexAttribPointer(color, 4, gl.FLOAT, false, 28, 12);
+    gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 40, 0);
+    gl.vertexAttribPointer(color, 4, gl.FLOAT, false, 40, 12);
+    gl.vertexAttribPointer(normal, 3, gl.FLOAT, false, 40, 28);
   };
   const drawParts = () => {
     for (const part of parts) {
       gl.uniformMatrix4fv(matrix, false, partMatrix(part));
+      gl.uniformMatrix3fv(normalMatrix, false, partNormalMatrix(part));
       gl.uniform1f(alpha, partAlpha);
       gl.uniform1f(depthBias, 0);
+      gl.uniform1f(lighting, 1);
       bindBuffer(part.renderMesh.fillBuffer);
       gl.drawArrays(gl.TRIANGLES, 0, part.renderMesh.fillCount);
       if (part.renderMesh.lineCount) {
         gl.uniform1f(alpha, partAlpha < 1 ? .2 : 1);
         gl.uniform1f(depthBias, -0.0004);
+        gl.uniform1f(lighting, 0);
         bindBuffer(part.renderMesh.lineBuffer);
         gl.lineWidth(Math.max(1, ratio));
         gl.drawArrays(gl.LINES, 0, part.renderMesh.lineCount);
@@ -1135,26 +1177,36 @@ function renderSolidModel(parts, partAlpha, partMatrix, faces, modelLines, width
     0, 0, 1, 0,
     0, 0, 0, 1,
   ]);
+  const identityNormalMatrix = new Float32Array([
+    1, 0, 0,
+    0, 1, 0,
+    0, 0, 1,
+  ]);
   gl.uniformMatrix4fv(matrix, false, identityMatrix);
+  gl.uniformMatrix3fv(normalMatrix, false, identityNormalMatrix);
   gl.uniform1f(alpha, 1);
   gl.uniform1f(depthBias, 0);
   gl.disable(gl.DEPTH_TEST);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   bindBuffer(buffer);
+  gl.uniform1f(lighting, 1);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(transparentVertices), gl.DYNAMIC_DRAW);
-  gl.drawArrays(gl.TRIANGLES, 0, transparentVertices.length / 7);
+  gl.drawArrays(gl.TRIANGLES, 0, transparentVertices.length / 10);
+  gl.uniform1f(lighting, 0);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(transparentLineVertices), gl.DYNAMIC_DRAW);
   gl.lineWidth(Math.max(1, ratio));
-  gl.drawArrays(gl.LINES, 0, transparentLineVertices.length / 7);
+  gl.drawArrays(gl.LINES, 0, transparentLineVertices.length / 10);
 
   gl.disable(gl.BLEND);
   gl.enable(gl.DEPTH_TEST);
+  gl.uniform1f(lighting, 1);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(fillVertices), gl.DYNAMIC_DRAW);
-  gl.drawArrays(gl.TRIANGLES, 0, fillVertices.length / 7);
+  gl.drawArrays(gl.TRIANGLES, 0, fillVertices.length / 10);
+  gl.uniform1f(lighting, 0);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lineVertices), gl.DYNAMIC_DRAW);
   gl.lineWidth(Math.max(1, ratio));
-  gl.drawArrays(gl.LINES, 0, lineVertices.length / 7);
+  gl.drawArrays(gl.LINES, 0, lineVertices.length / 10);
 }
 
 function pathPolygon(ctx, points) {
