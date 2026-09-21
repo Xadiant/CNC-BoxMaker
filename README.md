@@ -42,6 +42,10 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
   and unit selection. DXFs made before this feature remain valid but have no
   settings to restore.
 - `CUT_OUTSIDE` contains the five part profiles.
+- Five bottom constructions are available: none, captured, full-footprint
+  butt-bottom, wall-inset butt-inside, and finger jointed. Butt-bottom shortens
+  the walls by the bottom material thickness so every mode preserves the entered
+  outside height.
 - `POCKET_BOTTOM_SLOT_<depth><unit>` contains the captured-bottom grooves. The
   calculated pocket depth is included to three decimal places in the layer name,
   such as `POCKET_BOTTOM_SLOT_0.271IN`, and is also shown in the app.

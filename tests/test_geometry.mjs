@@ -117,6 +117,7 @@ test("missing optional values retain the established inch-derived defaults", () 
   assert.equal(spec.bottom_slot_offset, 12.7);
   assert.equal(spec.cutter_diameter, 3.175);
   assert.equal(spec.use_dogbones, true);
+  assert.equal(spec.bottom_type, "captured");
 });
 
 test("invalid slot placement and depth are rejected", () => {
@@ -145,6 +146,7 @@ test("DXF declares units, CAM layers, bulges, and saved settings", () => {
   assert.ok(dxf.includes("999\nwidth_mm=450"));
   assert.ok(dxf.includes("999\nbottom_slot_offset_mm=12"));
   assert.ok(dxf.includes("999\nuse_dogbones=true"));
+  assert.ok(dxf.includes("999\nbottom_type=captured"));
   assert.ok(dxf.endsWith("0\nEOF\n"));
 });
 
@@ -228,6 +230,94 @@ test("dogbones can be disabled without changing finger joints", () => {
   const dxf = layoutToDxf(layout);
   assert.ok(dxf.includes("999\nuse_dogbones=false"));
   assert.ok(!dxf.includes("\n42\n"));
+});
+
+test("butt-bottom spans the footprint and shortens walls to preserve overall height", () => {
+  const layout = buildLayout({ ...DEFAULT, bottom_type: "butt_bottom" });
+  const bottom = layout.parts.at(-1);
+  assert.deepEqual(layout.assembled_dimensions, { width: 450, depth: 400, height: 160 });
+  assert.deepEqual(bottom.assembly.origin, [0, 0, 0]);
+  assert.equal(layout.manufacturing.bottom_width, 450);
+  assert.equal(layout.manufacturing.bottom_depth, 400);
+  assert.ok(layout.parts.slice(0, 4).every((part) => part.assembly.origin[2] === 6));
+  assert.ok(layout.parts.slice(0, 4).every((part) => part.height === 154));
+  assert.ok(!layout.entities.some((entity) => entity.layer === "POCKET_BOTTOM_SLOT"));
+});
+
+test("no-bottom construction emits only four full-height walls", () => {
+  const layout = buildLayout({ ...DEFAULT, bottom_type: "none" });
+  assert.equal(layout.parts.length, 4);
+  assert.deepEqual(layout.assembled_dimensions, { width: 450, depth: 400, height: 160 });
+  assert.ok(layout.parts.every((part) => part.name !== "BOTTOM" && part.height === 160));
+  assert.ok(!layout.entities.some((entity) => entity.layer === "POCKET_BOTTOM_SLOT"));
+  assert.equal(layout.manufacturing.bottom_width, 0);
+  assert.equal(layout.manufacturing.bottom_depth, 0);
+  assert.ok(layoutToDxf(layout).includes("999\nbottom_type=none"));
+});
+
+test("butt-inside fits between the walls without changing outside dimensions", () => {
+  const layout = buildLayout({ ...DEFAULT, bottom_type: "butt_inside" });
+  const bottom = layout.parts.at(-1);
+  assert.deepEqual(layout.assembled_dimensions, { width: 450, depth: 400, height: 160 });
+  assert.deepEqual(bottom.assembly.origin, [12, 12, 0]);
+  assert.equal(layout.manufacturing.bottom_width, 426);
+  assert.equal(layout.manufacturing.bottom_depth, 376);
+  assert.ok(!layout.entities.some((entity) => entity.layer === "POCKET_BOTTOM_SLOT"));
+});
+
+test("finger-jointed bottom interlocks with all four wall bottoms", () => {
+  const layout = buildLayout({ ...DEFAULT, bottom_type: "finger_jointed" });
+  const withoutDogbones = buildLayout({ ...DEFAULT, bottom_type: "finger_jointed", use_dogbones: false });
+  const bottom = layout.parts.at(-1);
+  assert.deepEqual(layout.assembled_dimensions, { width: 450, depth: 400, height: 160 });
+  assert.deepEqual(bottom.assembly.origin, [12, 12, 0]);
+  assert.equal(layout.manufacturing.bottom_width, 450);
+  assert.equal(layout.manufacturing.bottom_depth, 400);
+  assert.ok(layout.parts.slice(0, 4).every((part) =>
+    new Set(part.profile.map(([, y]) => y)).size > 2
+  ));
+  assert.ok(bottom.profile.length > 4);
+  assert.ok(layout.parts.every((part) =>
+    part.operations.some((operation) => operation.type === "dogbone")
+  ));
+  layout.parts.forEach((part, index) => {
+    assert.notDeepEqual(part.profile, withoutDogbones.parts[index].profile);
+  });
+  assert.ok(!layout.entities.some((entity) => entity.layer === "POCKET_BOTTOM_SLOT"));
+  assert.ok(layoutToDxf(layout).includes("999\nbottom_type=finger_jointed"));
+});
+
+test("captured-only slot constraints do not block other bottom types", () => {
+  assert.doesNotThrow(() => buildLayout({
+    ...DEFAULT,
+    bottom_type: "butt_inside",
+    bottom_slot_depth: 20,
+    bottom_slot_extra: 10,
+    bottom_slot_offset: 1000,
+  }));
+  assert.throws(() => buildLayout({ ...DEFAULT, bottom_type: "unsupported" }), /bottom type/);
+});
+
+test("every bottom construction remains inside its assembled dimensions", () => {
+  for (const bottomType of ["none", "captured", "butt_bottom", "butt_inside", "finger_jointed"]) {
+    const layout = buildLayout({ ...DEFAULT, bottom_type: bottomType });
+    const limits = Object.values(layout.assembled_dimensions);
+    for (const part of layout.parts) {
+      const transform = part.assembly;
+      for (const [u, v] of part.profile) {
+        for (const q of [0, part.thickness]) {
+          const point = [0, 1, 2].map((axis) => transform.origin[axis]
+            + transform.u_axis[axis] * u
+            + transform.v_axis[axis] * v
+            + transform.thickness_axis[axis] * q);
+          point.forEach((coordinate, axis) => {
+            assert.ok(coordinate >= -1e-8, `${bottomType} axis ${axis} fell below zero`);
+            assert.ok(coordinate <= limits[axis] + 1e-8, `${bottomType} axis ${axis} exceeded its limit`);
+          });
+        }
+      }
+    }
+  }
 });
 
 test("invalid drawer dimensions are rejected", () => {

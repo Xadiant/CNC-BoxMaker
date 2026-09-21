@@ -4,6 +4,9 @@ import { layoutToDxf } from "./dxf.js";
 const form = document.querySelector("#drawerForm");
 const inputs = [...form.querySelectorAll('input[type="number"]')];
 const dogboneCheckbox = document.querySelector("#use_dogbones");
+const bottomTypeSelect = document.querySelector("#bottom_type");
+const capturedSettingRows = [...document.querySelectorAll(".captured-setting")];
+const bottomSettingRows = [...document.querySelectorAll(".bottom-setting")];
 const pieceCheckboxes = [...document.querySelectorAll("[data-draw-piece]")];
 const pieceDrawingCount = document.querySelector("#pieceDrawingCount");
 const modelCanvas = document.querySelector("#modelCanvas");
@@ -25,6 +28,21 @@ const modelMode = document.querySelector("#modelMode");
 const diagnosticStatus = document.querySelector("#diagnosticStatus");
 const modelTitle = document.querySelector("#modelTitle");
 const modelLegend = document.querySelector("#modelLegend");
+
+const bottomTypeLabels = {
+  none: "None",
+  captured: "Captured bottom",
+  butt_bottom: "Butt-bottom",
+  butt_inside: "Butt-inside",
+  finger_jointed: "Finger-jointed bottom",
+};
+const bottomTypeHelp = {
+  none: "Creates the four walls without a bottom piece.",
+  captured: "Rides in grooves routed into all four walls.",
+  butt_bottom: "Covers the outside footprint below shortened walls while preserving the requested overall height.",
+  butt_inside: "Fits between the four walls at the bottom of the box.",
+  finger_jointed: "Interlocks with finger joints along the bottoms of all four walls.",
+};
 
 let displayUnit = "in";
 let spec = readSpec();
@@ -70,11 +88,34 @@ function readSpec() {
   return {
     ...Object.fromEntries(inputs.map((input) => [input.name, Number(input.value) * factor])),
     use_dogbones: dogboneCheckbox.checked,
+    bottom_type: bottomTypeSelect.value,
   };
+}
+
+function updateBottomTypeControls() {
+  const bottomType = bottomTypeSelect.value;
+  const captured = bottomType === "captured";
+  const hasBottom = bottomType !== "none";
+  capturedSettingRows.forEach((row) => { row.hidden = !captured; });
+  bottomSettingRows.forEach((row) => { row.hidden = !hasBottom; });
+  document.querySelector("#bottomTypeHelp").textContent = bottomTypeHelp[bottomType];
+  document.querySelector("#bottomPieceLabel").textContent = bottomTypeLabels[bottomType];
+  document.querySelector("#bottomPieceOption").hidden = !hasBottom;
+  document.querySelector("#bottomLegendLabel").textContent = bottomTypeLabels[bottomType];
+  document.querySelector("#bottomLegend").hidden = !hasBottom;
+  document.querySelector("#grooveLegend").hidden = !captured;
+  document.querySelector("#pocketDepthLabel").textContent = captured ? "Bottom pocket depth" : "Bottom type";
+  updatePieceDrawingCount();
 }
 
 function selectedPieceNames() {
   return new Set(pieceCheckboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.dataset.drawPiece));
+}
+
+function updatePieceDrawingCount() {
+  const available = pieceCheckboxes.filter((checkbox) => !checkbox.closest("label").hidden);
+  const selectedCount = available.filter((checkbox) => checkbox.checked).length;
+  pieceDrawingCount.textContent = `${selectedCount} of ${available.length}`;
 }
 
 function visibleParts() {
@@ -132,10 +173,15 @@ function parseDxfSettings(text) {
   if (savedDogboneSetting !== undefined && savedDogboneSetting !== "true" && savedDogboneSetting !== "false") {
     throw new Error("The DXF has an invalid saved dogbone setting");
   }
+  const savedBottomType = metadata.bottom_type ?? "captured";
+  if (!Object.hasOwn(bottomTypeLabels, savedBottomType)) {
+    throw new Error("The DXF has an invalid saved bottom type");
+  }
   return {
     units: importedUnit,
     values,
     useDogbones: savedDogboneSetting === undefined ? true : savedDogboneSetting === "true",
+    bottomType: savedBottomType,
   };
 }
 
@@ -185,8 +231,12 @@ async function updateGeometry(successMessage = "Geometry ready") {
     emptySpaceGeometry = null;
     errorMessage.hidden = true;
     downloadButton.disabled = false;
-    dimensionCard.textContent = `${measure(spec.width).replace(` ${displayUnit}`, "")} × ${measure(spec.depth).replace(` ${displayUnit}`, "")} × ${measure(spec.height)}`;
-    document.querySelector("#pocketDepth").textContent = measureFixed(result.manufacturing.pocket_depth);
+    document.querySelector("#partCount").textContent = String(result.parts.length);
+    const dimensions = result.assembled_dimensions;
+    dimensionCard.textContent = `${measure(dimensions.width).replace(` ${displayUnit}`, "")} × ${measure(dimensions.depth).replace(` ${displayUnit}`, "")} × ${measure(dimensions.height)}`;
+    document.querySelector("#pocketDepth").textContent = result.manufacturing.has_bottom_groove
+      ? measureFixed(result.manufacturing.pocket_depth)
+      : bottomTypeLabels[spec.bottom_type];
     document.querySelector("#dogboneSize").textContent = result.manufacturing.dogbones_enabled
       ? measure(result.manufacturing.dogbone_diameter)
       : "Off";
@@ -241,11 +291,48 @@ function pointInsideProfile(x, y, profile) {
   return inside;
 }
 
-function partMesh(part) {
-  if (part._mesh) return part._mesh;
+function directExtrusionMesh(profile, thickness) {
+  const flatPoints = profile.map(([x, y]) => ({ x, y }));
+  const triangles = triangulatePolygon(flatPoints);
+  const faces = [];
+  for (const triangle of triangles) {
+    faces.push({
+      surface: "major",
+      points: [...triangle].reverse().map((index) => [...profile[index], 0]),
+    });
+    faces.push({
+      surface: "major",
+      points: triangle.map((index) => [...profile[index], thickness]),
+    });
+  }
+
+  const lines = [];
+  for (let index = 0; index < profile.length; index++) {
+    const current = profile[index];
+    const next = profile[(index + 1) % profile.length];
+    faces.push({
+      surface: "edge",
+      points: [[...current, 0], [...next, 0], [...next, thickness], [...current, thickness]],
+    });
+    lines.push({ color: "#49331f", points: [[...current, 0], [...next, 0]] });
+    lines.push({ color: "#49331f", points: [[...current, thickness], [...next, thickness]] });
+    lines.push({ color: "#49331f", points: [[...current, 0], [...current, thickness]] });
+  }
+  return { faces, lines, cells: [] };
+}
+
+function partMesh(part, diagnostic = false) {
+  const cacheKey = diagnostic ? "_diagnosticMesh" : "_mesh";
+  if (part[cacheKey]) return part[cacheKey];
+  const profile = diagnostic ? part.diagnostic_profile ?? part.profile : part.profile;
   const grooves = part.operations.filter((operation) => operation.type === "groove");
-  const uCoordinates = part.profile.map((point) => point[0]);
-  const vCoordinates = part.profile.map((point) => point[1]);
+  if (!diagnostic && !grooves.length) {
+    const mesh = directExtrusionMesh(profile, part.thickness);
+    part[cacheKey] = mesh;
+    return mesh;
+  }
+  const uCoordinates = profile.map((point) => point[0]);
+  const vCoordinates = profile.map((point) => point[1]);
   const qCoordinates = [0, part.thickness];
   for (const groove of grooves) {
     const [gx, gy, gw, gh] = groove.rect;
@@ -265,7 +352,7 @@ function partMesh(part) {
         const u = (us[ui] + us[ui + 1]) / 2;
         const v = (vs[vi] + vs[vi + 1]) / 2;
         const q = (qs[qi] + qs[qi + 1]) / 2;
-        if (!pointInsideProfile(u, v, part.profile)) continue;
+        if (!pointInsideProfile(u, v, profile)) continue;
         const removed = grooves.some((groove) => {
           const [gx, gy, gw, gh] = groove.rect;
           return u > gx - 1e-8 && u < gx + gw + 1e-8
@@ -299,14 +386,14 @@ function partMesh(part) {
   }
 
   const lines = [];
-  for (let index = 0; index < part.profile.length; index++) {
-    const current = part.profile[index], next = part.profile[(index + 1) % part.profile.length];
+  for (let index = 0; index < profile.length; index++) {
+    const current = profile[index], next = profile[(index + 1) % profile.length];
     lines.push({ color: "#49331f", points: [[...current, 0], [...next, 0]] });
     lines.push({ color: "#49331f", points: [[...current, part.thickness], [...next, part.thickness]] });
     lines.push({ color: "#49331f", points: [[...current, 0], [...current, part.thickness]] });
   }
-  part._mesh = { faces, lines, cells };
-  return part._mesh;
+  part[cacheKey] = { faces, lines, cells };
+  return part[cacheKey];
 }
 
 function assemblyPoint(part, [u, v, q], spread = 0) {
@@ -320,8 +407,47 @@ function assemblyPoint(part, [u, v, q], spread = 0) {
   );
 }
 
+function mergeSolidCells(cells) {
+  const epsilon = 1e-9;
+  let boxes = cells.map((cell) => ({ min: [...cell.min], max: [...cell.max] }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let axis = 0; axis < 3; axis++) {
+      const otherAxes = [0, 1, 2].filter((candidate) => candidate !== axis);
+      const groups = new Map();
+      for (const box of boxes) {
+        const key = otherAxes.flatMap((otherAxis) => [box.min[otherAxis], box.max[otherAxis]])
+          .map((value) => value.toFixed(10))
+          .join(":");
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(box);
+      }
+      const merged = [];
+      for (const group of groups.values()) {
+        group.sort((first, second) => first.min[axis] - second.min[axis]);
+        let current = group[0];
+        for (const next of group.slice(1)) {
+          if (Math.abs(current.max[axis] - next.min[axis]) <= epsilon) {
+            current = { min: [...current.min], max: [...current.max] };
+            current.max[axis] = next.max[axis];
+            changed = true;
+          } else {
+            merged.push(current);
+            current = next;
+          }
+        }
+        merged.push(current);
+      }
+      boxes = merged;
+    }
+  }
+  return boxes;
+}
+
 function partSolidBoxes(part, spread = 0) {
-  return partMesh(part).cells.map((cell) => {
+  if (!part._solidCells) part._solidCells = mergeSolidCells(partMesh(part, true).cells);
+  return part._solidCells.map((cell) => {
     const corners = [];
     for (const u of [cell.min[0], cell.max[0]]) {
       for (const v of [cell.min[1], cell.max[1]]) {
@@ -414,17 +540,17 @@ function buildOverlapGeometry(parts, spread) {
 function buildEmptySpaceGeometry(parts, drawerSpec, spread) {
   const epsilon = 1e-7;
   const solids = parts.flatMap((part) => partSolidBoxes(part, spread));
-  const bottomPart = parts.find((part) => part.name === "CAPTURED BOTTOM");
+  const bottomPart = parts.find((part) => part.name === "BOTTOM");
   const bottomBoxes = bottomPart ? partSolidBoxes(bottomPart, spread) : [];
   if (!bottomBoxes.length) return { faces: [], lines: [], regionCount: 0, volume: 0, spread };
 
   const bottomMin = Math.min(...bottomBoxes.map((box) => box.min[2]));
   const bottomTop = Math.max(...bottomBoxes.map((box) => box.max[2]));
-  const limits = [drawerSpec.width, drawerSpec.depth, drawerSpec.height];
+  const limits = [drawerSpec.assembled_width, drawerSpec.assembled_depth, drawerSpec.assembled_height];
   const boundaries = [
-    [0, drawerSpec.wall_thickness, drawerSpec.width - drawerSpec.wall_thickness, drawerSpec.width],
-    [0, drawerSpec.wall_thickness, drawerSpec.depth - drawerSpec.wall_thickness, drawerSpec.depth],
-    [bottomMin, bottomTop, drawerSpec.height],
+    [0, drawerSpec.wall_thickness, drawerSpec.assembled_width - drawerSpec.wall_thickness, drawerSpec.assembled_width],
+    [0, drawerSpec.wall_thickness, drawerSpec.assembled_depth - drawerSpec.wall_thickness, drawerSpec.assembled_depth],
+    [bottomMin, bottomTop, drawerSpec.assembled_height],
   ];
   const coordinates = [0, 1, 2].map((axis) => uniqueCoordinates([
     ...boundaries[axis],
@@ -446,9 +572,9 @@ function buildEmptySpaceGeometry(parts, drawerSpec, spread) {
           (coordinates[2][zi] + coordinates[2][zi + 1]) / 2,
         ];
         const insideOpenArea = point[0] > drawerSpec.wall_thickness
-          && point[0] < drawerSpec.width - drawerSpec.wall_thickness
+          && point[0] < drawerSpec.assembled_width - drawerSpec.wall_thickness
           && point[1] > drawerSpec.wall_thickness
-          && point[1] < drawerSpec.depth - drawerSpec.wall_thickness
+          && point[1] < drawerSpec.assembled_depth - drawerSpec.wall_thickness
           && point[2] > bottomTop - epsilon;
         if (!insideOpenArea && !insideSolid(point)) emptyCells.add(key(xi, yi, zi));
       }
@@ -511,7 +637,9 @@ function drawModel() {
   const { width: cw, height: ch, ratio } = sizeCanvas(modelCanvas);
   if (!spec || !layout?.parts) return;
 
-  const w = spec.width, d = spec.depth, h = spec.height;
+  const w = layout.assembled_dimensions.width;
+  const d = layout.assembled_dimensions.depth;
+  const h = layout.assembled_dimensions.height;
   const maxDimension = Math.max(w, d, h * 1.8);
   const drawMode = modelMode.value;
   const diagnosticMode = drawMode !== "assembly";
@@ -534,7 +662,7 @@ function drawModel() {
     BACK: "#c99554",
     "LEFT SIDE": "#a96f32",
     "RIGHT SIDE": "#d2a15d",
-    "CAPTURED BOTTOM": "#78934f",
+    BOTTOM: "#78934f",
   };
   const partPoint = (part, [u, v], thicknessPosition) => {
     const transform = part.assembly;
@@ -553,7 +681,7 @@ function drawModel() {
   const parts = visibleParts();
   const addParts = (alpha) => {
     for (const part of parts) {
-      const isBottom = part.name === "CAPTURED BOTTOM";
+      const isBottom = part.name === "BOTTOM";
       const color = partColors[part.name] || "#bd8a4d";
       const transform = part.assembly;
       const profileNormal = cross3(transform.u_axis, transform.v_axis);
@@ -592,7 +720,12 @@ function drawModel() {
       : "No physical overlaps";
   } else if (drawMode === "empty") {
     if (!emptySpaceGeometry || Math.abs(emptySpaceGeometry.spread - spread) > 1e-7) {
-      emptySpaceGeometry = buildEmptySpaceGeometry(layout.parts, spec, spread);
+      emptySpaceGeometry = buildEmptySpaceGeometry(layout.parts, {
+        ...spec,
+        assembled_width: w,
+        assembled_depth: d,
+        assembled_height: h,
+      }, spread);
     }
     faces.push(...emptySpaceGeometry.faces);
     modelLines.push(...emptySpaceGeometry.lines.map((line) => ({ ...line, projected: line.points.map(project) })));
@@ -1002,7 +1135,7 @@ downloadButton.addEventListener("click", async () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    const fileDimensions = [spec.width, spec.depth, spec.height]
+    const fileDimensions = Object.values(layout.assembled_dimensions)
       .map((value) => formatInput(displayUnit === "in" ? value / 25.4 : value))
       .join("x");
     link.download = `drawer-${fileDimensions}${displayUnit}.dxf`;
@@ -1031,6 +1164,8 @@ dxfSettingsFile.addEventListener("change", async () => {
     clearTimeout(updateTimer);
     showMillimetreValues(imported.values, imported.units);
     dogboneCheckbox.checked = imported.useDogbones;
+    bottomTypeSelect.value = imported.bottomType;
+    updateBottomTypeControls();
     spec = readSpec();
     await updateGeometry(`Settings loaded from ${file.name}`);
   } catch (error) {
@@ -1042,8 +1177,12 @@ dxfSettingsFile.addEventListener("change", async () => {
 
 inputs.forEach((input) => input.addEventListener("input", scheduleUpdate));
 dogboneCheckbox.addEventListener("change", scheduleUpdate);
+bottomTypeSelect.addEventListener("change", () => {
+  updateBottomTypeControls();
+  scheduleUpdate();
+});
 pieceCheckboxes.forEach((checkbox) => checkbox.addEventListener("change", () => {
-  pieceDrawingCount.textContent = `${selectedPieceNames().size} of ${pieceCheckboxes.length}`;
+  updatePieceDrawingCount();
   drawModel();
 }));
 unitButtons.forEach((button) => button.addEventListener("click", () => setUnit(button.dataset.unit)));
@@ -1057,4 +1196,5 @@ new ResizeObserver(() => {
   if (layout) fitDrawing();
 }).observe(document.querySelector(".workspace"));
 
+updateBottomTypeControls();
 updateGeometry();

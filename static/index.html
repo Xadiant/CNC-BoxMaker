@@ -21,6 +21,21 @@
         </div>
 
         <form id="drawerForm" autocomplete="off">
+          <fieldset class="bottom-type-fieldset">
+            <legend>Bottom type</legend>
+            <label class="select-row" for="bottom_type">
+              <span>Construction</span>
+              <select id="bottom_type" name="bottom_type">
+                <option value="none">None</option>
+                <option value="captured" selected>Captured</option>
+                <option value="butt_bottom">Butt-bottom</option>
+                <option value="butt_inside">Butt-inside</option>
+                <option value="finger_jointed">Finger jointed</option>
+              </select>
+            </label>
+            <p id="bottomTypeHelp" class="control-help">Rides in grooves routed into all four walls.</p>
+          </fieldset>
+
           <label class="dogbone-toggle" for="use_dogbones">
             <input id="use_dogbones" name="use_dogbones" type="checkbox" checked />
             <span>
@@ -51,7 +66,7 @@
               <label for="wall_thickness">Wall material <span>T</span></label>
               <div class="input-wrap"><input id="wall_thickness" name="wall_thickness" type="number" value="0.5" min="0.11811" max="1.9685" step="0.001" /><em>in</em></div>
             </div>
-            <div class="field-row">
+            <div class="field-row bottom-setting">
               <label for="bottom_thickness">Bottom material <span>B</span></label>
               <div class="input-wrap"><input id="bottom_thickness" name="bottom_thickness" type="number" value="0.25" min="0.03937" max="1.1811" step="0.001" /><em>in</em></div>
             </div>
@@ -67,15 +82,15 @@
               <label for="finger_clearance">Finger clearance <span>G</span></label>
               <div class="input-wrap"><input id="finger_clearance" name="finger_clearance" type="number" value="0.01" min="0" max="0.3937" step="0.001" /><em>in</em></div>
             </div>
-            <div class="field-row">
+            <div class="field-row captured-setting">
               <label for="bottom_slot_extra">Bottom slot extra <span>C</span></label>
               <div class="input-wrap"><input id="bottom_slot_extra" name="bottom_slot_extra" type="number" value="0.02125" min="0" max="0.3937" step="0.00001" /><em>in</em></div>
             </div>
-            <div class="field-row">
+            <div class="field-row captured-setting">
               <label for="bottom_slot_depth">Bottom slot depth <span>P</span></label>
               <div class="input-wrap"><input id="bottom_slot_depth" name="bottom_slot_depth" type="number" value="0.25" min="0.00394" max="1.9685" step="0.001" /><em>in</em></div>
             </div>
-            <div class="field-row">
+            <div class="field-row captured-setting">
               <label for="bottom_slot_offset">Bottom slot offset <span>O</span></label>
               <div class="input-wrap"><input id="bottom_slot_offset" name="bottom_slot_offset" type="number" value="0.5" min="0" max="39.37008" step="0.001" /><em>in</em></div>
             </div>
@@ -87,8 +102,8 @@
         </form>
 
         <div class="cut-summary">
-          <div><span>Parts</span><strong>5</strong></div>
-          <div><span>Bottom pocket depth</span><strong id="pocketDepth">0.271 in</strong></div>
+          <div><span>Parts</span><strong id="partCount">5</strong></div>
+          <div><span id="pocketDepthLabel">Bottom pocket depth</span><strong id="pocketDepth">0.271 in</strong></div>
           <div><span>Dogbone Ø</span><strong id="dogboneSize">0.125 in</strong></div>
         </div>
 
@@ -100,7 +115,7 @@
         </button>
         <button id="importSettingsButton" class="import-button" type="button">Load settings from DXF</button>
         <input id="dxfSettingsFile" type="file" accept=".dxf,application/dxf" hidden />
-        <p class="fine-print">Exports include these settings for later reload. Finger clearance is added to each socket's total width and depth, split evenly between its two side faces; when dogbones are enabled, it also shifts them back toward the corner at 45°. Slot offset is measured from the panel bottom to the lower edge of the groove. Extra is added to the requested slot depth and width to calculate the routed pocket.</p>
+        <p class="fine-print">Exports include these settings for later reload. Finger clearance is added to each socket's total width and depth, split evenly between its two side faces; when dogbones are enabled, it also shifts them back toward the corner at 45°. Captured-bottom slot offset is measured from the panel bottom to the lower edge of the groove.</p>
 
         <fieldset class="piece-drawing">
           <legend>Pieces to draw <span id="pieceDrawingCount">5 of 5</span></legend>
@@ -109,7 +124,7 @@
             <label><input type="checkbox" data-draw-piece="BACK" checked /><span>Back</span></label>
             <label><input type="checkbox" data-draw-piece="LEFT SIDE" checked /><span>Left side</span></label>
             <label><input type="checkbox" data-draw-piece="RIGHT SIDE" checked /><span>Right side</span></label>
-            <label><input type="checkbox" data-draw-piece="CAPTURED BOTTOM" checked /><span>Captured bottom</span></label>
+            <label id="bottomPieceOption"><input type="checkbox" data-draw-piece="BOTTOM" checked /><span id="bottomPieceLabel">Captured bottom</span></label>
           </div>
         </fieldset>
       </section>
@@ -142,8 +157,8 @@
         </div>
         <div class="viewer-footer" id="modelLegend">
           <div class="assembly-legend-item"><span class="swatch wall"></span>Wall material</div>
-          <div class="assembly-legend-item"><span class="swatch bottom"></span>Captured bottom</div>
-          <div class="assembly-legend-item"><span class="swatch groove"></span>Bottom groove</div>
+          <div class="assembly-legend-item" id="bottomLegend"><span class="swatch bottom"></span><span id="bottomLegendLabel">Captured bottom</span></div>
+          <div class="assembly-legend-item" id="grooveLegend"><span class="swatch groove"></span>Bottom groove</div>
           <div class="overlap-legend-item"><span class="swatch overlap"></span>Physical overlap</div>
           <div class="empty-legend-item"><span class="swatch empty"></span>Unexpected empty space</div>
         </div>
