@@ -77,6 +77,14 @@ let modelRenderer = null;
 let overlapGeometry = null;
 let emptySpaceGeometry = null;
 
+const partColors = {
+  FRONT: "#bf8744",
+  BACK: "#c99554",
+  "LEFT SIDE": "#a96f32",
+  "RIGHT SIDE": "#d2a15d",
+  BOTTOM: "#78934f",
+};
+
 const fieldLimits = {
   width: [50, 1500, 1],
   depth: [50, 1500, 1],
@@ -289,7 +297,10 @@ async function updateGeometry(successMessage = "Geometry ready") {
   spec = readSpec();
   try {
     const result = buildLayout(spec);
+    preparePartMeshes(result.parts);
     if (sequence !== requestSequence) return;
+    uploadPartMeshes(result.parts);
+    releasePartMeshes(layout?.parts ?? []);
     layout = result;
     overlapGeometry = null;
     emptySpaceGeometry = null;
@@ -427,21 +438,25 @@ function miteredExtrusionMesh(profile, thickness) {
   return { faces, lines, cells: [] };
 }
 
-function partMesh(part, diagnostic = false) {
-  const cacheKey = diagnostic ? "_diagnosticMesh" : "_mesh";
-  if (part[cacheKey]) return part[cacheKey];
+function finishPartMesh(mesh) {
+  for (const face of mesh.faces) {
+    face.triangles = Array.from(
+      { length: Math.max(0, face.points.length - 2) },
+      (_, index) => [0, index + 1, index + 2],
+    );
+  }
+  return mesh;
+}
+
+function generatePartMesh(part, diagnostic = false) {
   const profile = diagnostic ? part.diagnostic_profile ?? part.profile : part.profile;
   const grooves = part.operations.filter((operation) => ["groove", "hidden_finger_pocket"].includes(operation.type));
   const hiddenFingerReliefs = part.operations.filter((operation) => operation.type === "hidden_finger_relief");
   if (!diagnostic && part.mitered_edges) {
-    const mesh = miteredExtrusionMesh(profile, part.thickness);
-    part[cacheKey] = mesh;
-    return mesh;
+    return finishPartMesh(miteredExtrusionMesh(profile, part.thickness));
   }
   if (!diagnostic && !grooves.length && !hiddenFingerReliefs.length) {
-    const mesh = directExtrusionMesh(profile, part.thickness);
-    part[cacheKey] = mesh;
-    return mesh;
+    return finishPartMesh(directExtrusionMesh(profile, part.thickness));
   }
   const uCoordinates = profile.map((point) => point[0]);
   const vCoordinates = profile.map((point) => point[1]);
@@ -522,8 +537,7 @@ function partMesh(part, diagnostic = false) {
     lines.push({ color: "#49331f", points: [[...current, part.thickness], [...next, part.thickness]] });
     lines.push({ color: "#49331f", points: [[...current, 0], [...current, part.thickness]] });
   }
-  part[cacheKey] = { faces, lines, cells };
-  return part[cacheKey];
+  return finishPartMesh({ faces, lines, cells });
 }
 
 function assemblyPoint(part, [u, v, q], spread = 0) {
@@ -575,9 +589,68 @@ function mergeSolidCells(cells) {
   return boxes;
 }
 
+function preparePartMeshes(parts) {
+  for (const part of parts) {
+    part.mesh = generatePartMesh(part);
+    part.diagnosticMesh = generatePartMesh(part, true);
+    part.solidCells = mergeSolidCells(part.diagnosticMesh.cells);
+    const fillVertices = [];
+    const lineVertices = [];
+    const color = partColors[part.name] || "#bd8a4d";
+    const isBottom = part.name === "BOTTOM";
+    for (const face of part.mesh.faces) {
+      const shade = face.surface === "edge" ? -34 : isBottom ? 2 : 10;
+      const channels = rgbChannels(color, shade);
+      for (const triangle of face.triangles) {
+        for (const index of triangle) {
+          fillVertices.push(...face.points[index], ...channels, 1);
+        }
+      }
+    }
+    if (isBottom) {
+      for (const line of part.mesh.lines) {
+        const channels = rgbChannels(line.color);
+        for (const point of line.points) lineVertices.push(...point, ...channels, 1);
+      }
+    }
+    part.renderData = {
+      fillVertices: new Float32Array(fillVertices),
+      lineVertices: new Float32Array(lineVertices),
+    };
+  }
+}
+
+function uploadPartMeshes(parts) {
+  if (!modelRenderer) modelRenderer = createModelRenderer(modelCanvas);
+  const { gl } = modelRenderer;
+  for (const part of parts) {
+    const fillBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, fillBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, part.renderData.fillVertices, gl.STATIC_DRAW);
+    const lineBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, part.renderData.lineVertices, gl.STATIC_DRAW);
+    part.renderMesh = {
+      fillBuffer,
+      fillCount: part.renderData.fillVertices.length / 7,
+      lineBuffer,
+      lineCount: part.renderData.lineVertices.length / 7,
+    };
+    delete part.renderData;
+  }
+}
+
+function releasePartMeshes(parts) {
+  if (!modelRenderer) return;
+  for (const part of parts) {
+    if (!part.renderMesh) continue;
+    modelRenderer.gl.deleteBuffer(part.renderMesh.fillBuffer);
+    modelRenderer.gl.deleteBuffer(part.renderMesh.lineBuffer);
+  }
+}
+
 function partSolidBoxes(part, spread = 0) {
-  if (!part._solidCells) part._solidCells = mergeSolidCells(partMesh(part, true).cells);
-  return part._solidCells.map((cell) => {
+  return part.solidCells.map((cell) => {
     const corners = [];
     for (const u of [cell.min[0], cell.max[0]]) {
       for (const v of [cell.min[1], cell.max[1]]) {
@@ -778,67 +851,45 @@ function drawModel() {
   const framing = 1 + explosion * .55;
   const scale = (Math.min(cw, ch) * 0.68 / maxDimension / framing) * modelView.zoom;
   const center = [w / 2, d / 2, h * 0.45];
-  const project = (point) => {
+  const viewPoint = (point) => {
     const rotated = rotatePoint([point[0] - center[0], point[1] - center[1], point[2] - center[2]]);
+    return rotated;
+  };
+  const project = (point) => {
+    const rotated = viewPoint(point);
     return {
       x: cw / 2 + modelView.panX * ratio + rotated[0] * scale,
       y: ch / 2 + modelView.panY * ratio + rotated[1] * scale,
       depth: rotated[2],
     };
   };
-
-  const partColors = {
-    FRONT: "#bf8744",
-    BACK: "#c99554",
-    "LEFT SIDE": "#a96f32",
-    "RIGHT SIDE": "#d2a15d",
-    BOTTOM: "#78934f",
+  const clipPoint = (point) => {
+    const rotated = viewPoint(point);
+    return [
+      modelView.panX * ratio * 2 / cw + rotated[0] * scale * 2 / cw,
+      -modelView.panY * ratio * 2 / ch - rotated[1] * scale * 2 / ch,
+      -rotated[2] / (maxDimension * 4),
+    ];
   };
-  const partPoint = (part, [u, v], thicknessPosition) => {
+  const partMatrix = (part) => {
     const transform = part.assembly;
-    const explode = transform.explode_axis.map((value) => value * spread);
-    return [0, 1, 2].map((axis) =>
-      transform.origin[axis]
-      + transform.u_axis[axis] * u
-      + transform.v_axis[axis] * v
-      + transform.thickness_axis[axis] * thicknessPosition
-      + explode[axis]
-    );
+    const origin = transform.origin.map((value, axis) => value + transform.explode_axis[axis] * spread);
+    const originClip = clipPoint(origin);
+    const columns = [transform.u_axis, transform.v_axis, transform.thickness_axis].map((basis) => {
+      const endpoint = clipPoint(origin.map((value, axis) => value + basis[axis]));
+      return endpoint.map((value, axis) => value - originClip[axis]);
+    });
+    return new Float32Array([
+      ...columns[0], 0,
+      ...columns[1], 0,
+      ...columns[2], 0,
+      ...originClip, 1,
+    ]);
   };
 
   const faces = [];
   const modelLines = [];
   const parts = visibleParts();
-  const addParts = (alpha) => {
-    for (const part of parts) {
-      const isBottom = part.name === "BOTTOM";
-      const color = partColors[part.name] || "#bd8a4d";
-      const transform = part.assembly;
-      const profileNormal = cross3(transform.u_axis, transform.v_axis);
-      const sameHandedness = dot3(profileNormal, transform.thickness_axis) > 0;
-      const mesh = partMesh(part);
-      for (const meshFace of mesh.faces) {
-        const points = meshFace.points.map(([u, v, q]) => partPoint(part, [u, v], q));
-        faces.push({
-          name: part.name,
-          color,
-          alpha,
-          isBottom,
-          surface: meshFace.surface,
-          points: sameHandedness ? points : [...points].reverse(),
-        });
-      }
-      for (const line of mesh.lines) {
-        modelLines.push({
-          color: line.color,
-          alpha: diagnosticMode ? .2 : 1,
-          projected: line.points.map(([u, v, q]) => project(partPoint(part, [u, v], q))),
-        });
-      }
-    }
-  };
-
-  addParts(diagnosticMode ? .14 : 1);
   if (drawMode === "overlaps") {
     if (!overlapGeometry || Math.abs(overlapGeometry.spread - spread) > 1e-7) {
       overlapGeometry = buildOverlapGeometry(layout.parts, spread);
@@ -868,20 +919,20 @@ function drawModel() {
   const visibleFaces = faces
     .filter((face) => projectedArea(face.projected) > .01)
     .sort((a, b) => avgDepth(a.projected) - avgDepth(b.projected));
-  renderSolidModel(visibleFaces, modelLines, cw, ch, maxDimension, ratio);
+  renderSolidModel(
+    parts,
+    diagnosticMode ? .14 : 1,
+    partMatrix,
+    visibleFaces,
+    modelLines,
+    cw,
+    ch,
+    maxDimension,
+    ratio,
+  );
 }
 
 function avgDepth(points) { return points.reduce((sum, point) => sum + point.depth, 0) / points.length; }
-
-function cross3(a, b) {
-  return [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0],
-  ];
-}
-
-function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
 function projectedArea(points) {
   let twiceArea = 0;
@@ -953,10 +1004,14 @@ function createModelRenderer(canvas) {
   const vertexShader = compileShader(gl, gl.VERTEX_SHADER, `
     attribute vec3 a_position;
     attribute vec4 a_color;
+    uniform mat4 u_matrix;
+    uniform float u_alpha;
+    uniform float u_depth_bias;
     varying vec4 v_color;
     void main() {
-      gl_Position = vec4(a_position, 1.0);
-      v_color = a_color;
+      gl_Position = u_matrix * vec4(a_position, 1.0);
+      gl_Position.z += u_depth_bias;
+      v_color = vec4(a_color.rgb, a_color.a * u_alpha);
     }
   `);
   const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, `
@@ -979,6 +1034,9 @@ function createModelRenderer(canvas) {
     buffer: gl.createBuffer(),
     position: gl.getAttribLocation(program, "a_position"),
     color: gl.getAttribLocation(program, "a_color"),
+    matrix: gl.getUniformLocation(program, "u_matrix"),
+    alpha: gl.getUniformLocation(program, "u_alpha"),
+    depthBias: gl.getUniformLocation(program, "u_depth_bias"),
   };
 }
 
@@ -989,9 +1047,9 @@ function rgbChannels(hex, adjustment = 0) {
   );
 }
 
-function renderSolidModel(faces, modelLines, width, height, maxDimension, ratio) {
+function renderSolidModel(parts, partAlpha, partMatrix, faces, modelLines, width, height, maxDimension, ratio) {
   if (!modelRenderer) modelRenderer = createModelRenderer(modelCanvas);
-  const { gl, program, buffer, position, color } = modelRenderer;
+  const { gl, program, buffer, position, color, matrix, alpha, depthBias } = modelRenderer;
   const depthRange = maxDimension * 4;
   const toClip = (point, depthBias = 0) => [
     point.x / width * 2 - 1,
@@ -1011,7 +1069,7 @@ function renderSolidModel(faces, modelLines, width, height, maxDimension, ratio)
     const channels = rgbChannels(face.color, shade);
     const alpha = face.alpha ?? 1;
     const target = alpha < 1 ? transparentVertices : fillVertices;
-    for (const triangle of triangulatePolygon(face.projected)) {
+    for (const triangle of face.triangles ?? triangulatePolygon(face.projected)) {
       for (const index of triangle) pushVertex(target, face.projected[index], channels, alpha);
     }
   }
@@ -1035,10 +1093,55 @@ function renderSolidModel(faces, modelLines, width, height, maxDimension, ratio)
   gl.enableVertexAttribArray(color);
   gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 28, 0);
   gl.vertexAttribPointer(color, 4, gl.FLOAT, false, 28, 12);
+  gl.uniform1f(alpha, 1);
+  gl.uniform1f(depthBias, 0);
 
+  const bindBuffer = (vertexBuffer) => {
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 28, 0);
+    gl.vertexAttribPointer(color, 4, gl.FLOAT, false, 28, 12);
+  };
+  const drawParts = () => {
+    for (const part of parts) {
+      gl.uniformMatrix4fv(matrix, false, partMatrix(part));
+      gl.uniform1f(alpha, partAlpha);
+      gl.uniform1f(depthBias, 0);
+      bindBuffer(part.renderMesh.fillBuffer);
+      gl.drawArrays(gl.TRIANGLES, 0, part.renderMesh.fillCount);
+      if (part.renderMesh.lineCount) {
+        gl.uniform1f(alpha, partAlpha < 1 ? .2 : 1);
+        gl.uniform1f(depthBias, -0.0004);
+        bindBuffer(part.renderMesh.lineBuffer);
+        gl.lineWidth(Math.max(1, ratio));
+        gl.drawArrays(gl.LINES, 0, part.renderMesh.lineCount);
+      }
+    }
+  };
+
+  if (partAlpha < 1) {
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    drawParts();
+  } else {
+    gl.disable(gl.BLEND);
+    gl.enable(gl.DEPTH_TEST);
+    drawParts();
+  }
+
+  const identityMatrix = new Float32Array([
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    0, 0, 0, 1,
+  ]);
+  gl.uniformMatrix4fv(matrix, false, identityMatrix);
+  gl.uniform1f(alpha, 1);
+  gl.uniform1f(depthBias, 0);
   gl.disable(gl.DEPTH_TEST);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  bindBuffer(buffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(transparentVertices), gl.DYNAMIC_DRAW);
   gl.drawArrays(gl.TRIANGLES, 0, transparentVertices.length / 7);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(transparentLineVertices), gl.DYNAMIC_DRAW);
