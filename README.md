@@ -1,6 +1,6 @@
-# DrawerForge
+# Box
 
-A small, dependency-free browser app that generates a CNC-ready DXF layout for an open-top drawer with finger-jointed walls and a captured bottom. Geometry, previews, validation, DXF generation, and DXF settings import all run locally in the browser. Python only serves the static web files.
+A small, dependency-free browser app that generates a CNC-ready DXF layout for an open-top box. Geometry, previews, validation, DXF generation, and DXF settings import all run locally in the browser. Python only serves the static web files.
 
 ## Live interface
 
@@ -37,7 +37,7 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
 ## DXF conventions
 
 - Units match the unit selected when downloading.
-- DrawerForge settings are embedded as standard DXF `999` comments. Use **Load
+- Box settings are embedded as standard DXF `999` comments. Use **Load
   settings from DXF** to restore the saved dimensions, materials, joinery, cutter,
   and unit selection. DXFs made before this feature remain valid but have no
   settings to restore.

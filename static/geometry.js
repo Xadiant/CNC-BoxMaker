@@ -93,7 +93,7 @@ export function validateSpec(values) {
   const wallPanelHeight = spec.height
     - (spec.bottom_type === "butt_bottom" ? spec.bottom_thickness : 0);
   if (spec.finger_size > wallPanelHeight / 2) {
-    throw new Error("finger size must be no more than half the drawer height");
+    throw new Error("finger size must be no more than half the box height");
   }
   if (spec.bottom_type === "captured") {
     if (spec.bottom_slot_depth + spec.bottom_slot_extra > spec.wall_thickness) {

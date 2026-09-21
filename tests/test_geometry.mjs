@@ -346,6 +346,6 @@ test("every bottom construction remains inside its assembled dimensions", () => 
   }
 });
 
-test("invalid drawer dimensions are rejected", () => {
+test("invalid box dimensions are rejected", () => {
   assert.throws(() => buildLayout({ ...DEFAULT, width: 30 }), /width/);
 });

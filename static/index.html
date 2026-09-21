@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#101311" />
-    <title>CNC drawer generator</title>
+    <title>CNC box generator</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -16,11 +16,11 @@
         </div>
         <div class="panel-heading">
           <span class="eyebrow">01 · Configure</span>
-          <h1 id="controlsTitle">Drawer dimensions</h1>
-          <p>Outside dimensions for an open-top, side-mounted drawer.</p>
+          <h1 id="controlsTitle">Box dimensions</h1>
+          <p>Outside dimensions for an open-top box.</p>
         </div>
 
-        <form id="drawerForm" autocomplete="off">
+        <form id="boxForm" autocomplete="off">
           <fieldset class="wall-connection-fieldset">
             <legend>Wall connection</legend>
             <label class="select-row" for="wall_connection">
@@ -159,7 +159,7 @@
           </div>
         </div>
         <div class="canvas-stage" id="modelStage">
-          <canvas id="modelCanvas" aria-label="Interactive 3D drawer preview"></canvas>
+          <canvas id="modelCanvas" aria-label="Interactive 3D box preview"></canvas>
           <div class="axis-key" aria-hidden="true"><i class="axis-x"></i>X <i class="axis-y"></i>Y <i class="axis-z"></i>Z</div>
           <div class="explode-control" id="explodeControl">
             <label for="explodeSlider">Exploded view <output id="explodeValue" for="explodeSlider">0%</output></label>

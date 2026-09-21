@@ -1,7 +1,7 @@
 import { buildLayout } from "./geometry.js";
 import { layoutToDxf } from "./dxf.js";
 
-const form = document.querySelector("#drawerForm");
+const form = document.querySelector("#boxForm");
 const inputs = [...form.querySelectorAll('input[type="number"]')];
 const dogboneCheckbox = document.querySelector("#use_dogbones");
 const wallConnectionSelect = document.querySelector("#wall_connection");
@@ -181,7 +181,7 @@ function parseDxfSettings(text) {
     if (lines[index].trim() === "999") comments.push(lines[index + 1].trim());
   }
   const markerIndex = comments.indexOf("DRAWERFORGE_SETTINGS_V1");
-  if (markerIndex < 0) throw new Error("This DXF does not contain DrawerForge settings");
+  if (markerIndex < 0) throw new Error("This DXF does not contain saved box settings");
 
   const metadata = Object.fromEntries(comments.slice(markerIndex + 1).map((comment) => {
     const separator = comment.indexOf("=");
@@ -607,7 +607,7 @@ function buildOverlapGeometry(parts, spread) {
   return { faces, lines: [...lineMap.values()], pairCount: collidingPairs.size, volume, spread };
 }
 
-function buildEmptySpaceGeometry(parts, drawerSpec, spread) {
+function buildEmptySpaceGeometry(parts, boxSpec, spread) {
   const epsilon = 1e-7;
   const solids = parts.flatMap((part) => partSolidBoxes(part, spread));
   const bottomPart = parts.find((part) => part.name === "BOTTOM");
@@ -616,11 +616,11 @@ function buildEmptySpaceGeometry(parts, drawerSpec, spread) {
 
   const bottomMin = Math.min(...bottomBoxes.map((box) => box.min[2]));
   const bottomTop = Math.max(...bottomBoxes.map((box) => box.max[2]));
-  const limits = [drawerSpec.assembled_width, drawerSpec.assembled_depth, drawerSpec.assembled_height];
+  const limits = [boxSpec.assembled_width, boxSpec.assembled_depth, boxSpec.assembled_height];
   const boundaries = [
-    [0, drawerSpec.wall_thickness, drawerSpec.assembled_width - drawerSpec.wall_thickness, drawerSpec.assembled_width],
-    [0, drawerSpec.wall_thickness, drawerSpec.assembled_depth - drawerSpec.wall_thickness, drawerSpec.assembled_depth],
-    [bottomMin, bottomTop, drawerSpec.assembled_height],
+    [0, boxSpec.wall_thickness, boxSpec.assembled_width - boxSpec.wall_thickness, boxSpec.assembled_width],
+    [0, boxSpec.wall_thickness, boxSpec.assembled_depth - boxSpec.wall_thickness, boxSpec.assembled_depth],
+    [bottomMin, bottomTop, boxSpec.assembled_height],
   ];
   const coordinates = [0, 1, 2].map((axis) => uniqueCoordinates([
     ...boundaries[axis],
@@ -641,10 +641,10 @@ function buildEmptySpaceGeometry(parts, drawerSpec, spread) {
           (coordinates[1][yi] + coordinates[1][yi + 1]) / 2,
           (coordinates[2][zi] + coordinates[2][zi + 1]) / 2,
         ];
-        const insideOpenArea = point[0] > drawerSpec.wall_thickness
-          && point[0] < drawerSpec.assembled_width - drawerSpec.wall_thickness
-          && point[1] > drawerSpec.wall_thickness
-          && point[1] < drawerSpec.assembled_depth - drawerSpec.wall_thickness
+        const insideOpenArea = point[0] > boxSpec.wall_thickness
+          && point[0] < boxSpec.assembled_width - boxSpec.wall_thickness
+          && point[1] > boxSpec.wall_thickness
+          && point[1] < boxSpec.assembled_depth - boxSpec.wall_thickness
           && point[2] > bottomTop - epsilon;
         if (!insideOpenArea && !insideSolid(point)) emptyCells.add(key(xi, yi, zi));
       }
@@ -1187,7 +1187,7 @@ modelMode.addEventListener("change", () => {
     : drawMode === "empty" ? "Unexpected empty space" : "Assembled model";
   modelCanvas.setAttribute("aria-label", drawMode === "overlaps"
     ? "Interactive 3D physical overlap preview"
-    : drawMode === "empty" ? "Interactive 3D unexpected empty space preview" : "Interactive 3D drawer preview");
+    : drawMode === "empty" ? "Interactive 3D unexpected empty space preview" : "Interactive 3D box preview");
   modelLegend.classList.toggle("overlap-mode", drawMode === "overlaps");
   modelLegend.classList.toggle("empty-mode", drawMode === "empty");
   drawModel();
@@ -1208,7 +1208,7 @@ downloadButton.addEventListener("click", async () => {
     const fileDimensions = Object.values(layout.assembled_dimensions)
       .map((value) => formatInput(displayUnit === "in" ? value / 25.4 : value))
       .join("x");
-    link.download = `drawer-${fileDimensions}${displayUnit}.dxf`;
+    link.download = `box-${fileDimensions}${displayUnit}.dxf`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
     setStatus("DXF downloaded", "ready");

@@ -1,4 +1,4 @@
-"""Serve the browser-only DrawerForge application."""
+"""Serve the browser-only box application."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 
 
-class DrawerHandler(SimpleHTTPRequestHandler):
+class BoxHandler(SimpleHTTPRequestHandler):
     """Serve files from the static application directory only."""
 
     def do_GET(self) -> None:  # noqa: N802
@@ -41,18 +41,18 @@ class DrawerHandler(SimpleHTTPRequestHandler):
         self.wfile.write(payload)
 
     def log_message(self, format_string: str, *args: object) -> None:
-        print(f"[DrawerForge] {format_string % args}")
+        print(f"[Box] {format_string % args}")
 
 
 def main() -> None:
     host, port = "127.0.0.1", 8000
-    server = ThreadingHTTPServer((host, port), DrawerHandler)
-    print(f"DrawerForge is running at http://{host}:{port}")
+    server = ThreadingHTTPServer((host, port), BoxHandler)
+    print(f"Box is running at http://{host}:{port}")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping DrawerForge.")
+        print("\nStopping Box.")
     finally:
         server.server_close()
 
