@@ -5,6 +5,7 @@ const DXF_SETTING_NAMES = [
   "depth",
   "finger_size",
   "finger_clearance",
+  "hidden_finger_skin",
   "wall_thickness",
   "bottom_thickness",
   "bottom_slot_extra",
@@ -33,7 +34,12 @@ export function layoutToDxf(layout, units = "mm") {
   const insertionUnits = units === "mm" ? 4 : 1;
   const pocketDepth = layout.manufacturing.pocket_depth * scale;
   const pocketLayer = `POCKET_BOTTOM_SLOT_${pocketDepth.toFixed(3)}${units.toUpperCase()}`;
-  const outputLayer = (layer) => layer === "POCKET_BOTTOM_SLOT" ? pocketLayer : layer;
+  const hiddenPocketDepth = layout.manufacturing.hidden_finger_pocket_depth * scale;
+  const hiddenPocketLayer = `POCKET_HIDDEN_FINGERS_${hiddenPocketDepth.toFixed(3)}${units.toUpperCase()}`;
+  const outputLayer = (layer) => ({
+    POCKET_BOTTOM_SLOT: pocketLayer,
+    POCKET_HIDDEN_FINGERS: hiddenPocketLayer,
+  })[layer] ?? layer;
 
   const storedSpec = { ...layout.spec };
   if (storedSpec.bottom_slot_offset == null) storedSpec.bottom_slot_offset = storedSpec.wall_thickness;
@@ -56,11 +62,12 @@ export function layoutToDxf(layout, units = "mm") {
     pair(0, "LTYPE"), pair(100, "AcDbSymbolTableRecord"), pair(100, "AcDbLinetypeTableRecord"),
     pair(2, "DASHED"), pair(70, 0), pair(3, "Dashed __ __"), pair(72, 65), pair(73, 2),
     pair(40, 9 * scale), pair(49, 6 * scale), pair(74, 0), pair(49, -3 * scale), pair(74, 0),
-    pair(0, "ENDTAB"), pair(0, "TABLE"), pair(2, "LAYER"), pair(70, 4),
+    pair(0, "ENDTAB"), pair(0, "TABLE"), pair(2, "LAYER"), pair(70, 5),
   ];
   for (const [name, color, lineType] of [
     ["CUT_OUTSIDE", 7, "CONTINUOUS"],
     [pocketLayer, 5, "CONTINUOUS"],
+    [hiddenPocketLayer, 4, "CONTINUOUS"],
     ["MITER_END", 3, "DASHED"],
     ["ANNOTATION", 8, "CONTINUOUS"],
   ]) {

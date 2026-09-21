@@ -10,6 +10,7 @@ const bottomTypeSelect = document.querySelector("#bottom_type");
 const capturedSettingRows = [...document.querySelectorAll(".captured-setting")];
 const bottomSettingRows = [...document.querySelectorAll(".bottom-setting")];
 const fingerJointSettingRows = [...document.querySelectorAll(".finger-joint-setting")];
+const hiddenFingerSettingRows = [...document.querySelectorAll(".hidden-finger-setting")];
 const pieceCheckboxes = [...document.querySelectorAll("[data-draw-piece]")];
 const pieceDrawingCount = document.querySelector("#pieceDrawingCount");
 const modelCanvas = document.querySelector("#modelCanvas");
@@ -38,6 +39,7 @@ const bottomTypeLabels = {
   butt_bottom: "Butt-bottom",
   butt_inside: "Butt-inside",
   finger_jointed: "Finger-jointed bottom",
+  hidden_finger_jointed: "Hidden-finger bottom",
 };
 const bottomTypeHelp = {
   none: "Creates the four walls without a bottom piece.",
@@ -45,15 +47,18 @@ const bottomTypeHelp = {
   butt_bottom: "Covers the outside footprint below shortened walls while preserving the requested overall height.",
   butt_inside: "Fits between the four walls at the bottom of the box.",
   finger_jointed: "Interlocks with finger joints along the bottoms of all four walls.",
+  hidden_finger_jointed: "Interlocks with blind pockets in the walls, leaving the exterior faces uncut.",
 };
 const wallConnectionLabels = {
   finger: "Finger joints",
+  hidden_finger: "Hidden fingers",
   miter: "Mitered edges",
   butt_front_back: "Butted with end grain on front/back",
   butt_sides: "Butted with end grain on sides",
 };
 const wallConnectionHelp = {
   finger: "Interlocking finger joints at all four vertical corners.",
+  hidden_finger: "Alternating blind pockets interlock behind thin exterior skins, with clearance behind each closing skin.",
   miter: "Full-length walls meet with 45° beveled corner edges.",
   butt_front_back: "Side walls run full depth, exposing their end grain on the front and back.",
   butt_sides: "Front and back walls run full width, exposing their end grain on both sides.",
@@ -78,6 +83,7 @@ const fieldLimits = {
   height: [25, 1000, 1],
   finger_size: [3, 100, .5],
   finger_clearance: [0, 10, .01],
+  hidden_finger_skin: [.5, 50, .1],
   wall_thickness: [3, 50, .1],
   bottom_thickness: [1, 30, .1],
   bottom_slot_extra: [0, 10, .1],
@@ -91,6 +97,7 @@ const inchSteps = {
   height: ".01",
   finger_size: ".01",
   finger_clearance: ".001",
+  hidden_finger_skin: ".001",
   wall_thickness: ".001",
   bottom_thickness: ".001",
   bottom_slot_extra: ".00001",
@@ -125,12 +132,17 @@ function updateWallConnectionControls() {
 }
 
 function updateJoineryControls() {
-  const hasFingerJoints = wallConnectionSelect.value === "finger"
-    || bottomTypeSelect.value === "finger_jointed";
+  const hasFingerJoints = ["finger", "hidden_finger"].includes(wallConnectionSelect.value)
+    || ["finger_jointed", "hidden_finger_jointed"].includes(bottomTypeSelect.value);
+  const hasHiddenFingers = wallConnectionSelect.value === "hidden_finger"
+    || bottomTypeSelect.value === "hidden_finger_jointed";
   fingerJointSettingRows.forEach((row) => { row.hidden = !hasFingerJoints; });
+  hiddenFingerSettingRows.forEach((row) => { row.hidden = !hasHiddenFingers; });
   document.querySelector("#dogboneToggle").hidden = !hasFingerJoints;
   document.querySelector("#joinerySettings").hidden = !hasFingerJoints
     && bottomTypeSelect.value !== "captured";
+  document.querySelector("#grooveLegend").hidden = bottomTypeSelect.value !== "captured" && !hasHiddenFingers;
+  document.querySelector("#grooveLegendLabel").textContent = hasHiddenFingers ? "Pocket cuts" : "Bottom groove";
 }
 
 function updateBottomTypeControls() {
@@ -144,7 +156,6 @@ function updateBottomTypeControls() {
   document.querySelector("#bottomPieceOption").hidden = !hasBottom;
   document.querySelector("#bottomLegendLabel").textContent = bottomTypeLabels[bottomType];
   document.querySelector("#bottomLegend").hidden = !hasBottom;
-  document.querySelector("#grooveLegend").hidden = !captured;
   document.querySelector("#pocketDepthLabel").textContent = captured ? "Bottom pocket depth" : "Bottom type";
   updatePieceDrawingCount();
   updateJoineryControls();
@@ -203,10 +214,11 @@ function parseDxfSettings(text) {
   if (importedUnit !== "mm" && importedUnit !== "in") throw new Error("The DXF has an invalid saved unit setting");
 
   const values = {};
+  const legacyDefaults = { finger_clearance: 0.254, hidden_finger_skin: 1.5875 };
   for (const input of inputs) {
     const savedValue = metadata[`${input.name}_mm`];
-    const value = input.name === "finger_clearance" && savedValue === undefined
-      ? 0.254
+    const value = savedValue === undefined && Object.hasOwn(legacyDefaults, input.name)
+      ? legacyDefaults[input.name]
       : Number(savedValue);
     if (!Number.isFinite(value)) throw new Error(`The DXF is missing ${input.name.replaceAll("_", " ")}`);
     values[input.name] = value;
@@ -289,9 +301,18 @@ async function updateGeometry(successMessage = "Geometry ready") {
       ? result.assembled_dimensions
       : result.interior_dimensions;
     dimensionCard.textContent = `${displayedBasis} · ${measure(dimensions.width).replace(` ${displayUnit}`, "")} × ${measure(dimensions.depth).replace(` ${displayUnit}`, "")} × ${measure(dimensions.height)}`;
-    document.querySelector("#pocketDepth").textContent = result.manufacturing.has_bottom_groove
-      ? measureFixed(result.manufacturing.pocket_depth)
-      : bottomTypeLabels[spec.bottom_type];
+    const hasHiddenPockets = result.manufacturing.hidden_finger_pocket_depth > 0;
+    const hasBottomPocket = result.manufacturing.has_bottom_groove;
+    document.querySelector("#pocketDepthLabel").textContent = hasHiddenPockets && hasBottomPocket
+      ? "Hidden / bottom depth"
+      : hasHiddenPockets ? "Hidden pocket depth"
+      : result.manufacturing.has_bottom_groove ? "Bottom pocket depth" : "Bottom type";
+    document.querySelector("#pocketDepth").textContent = hasHiddenPockets && hasBottomPocket
+      ? `${measureFixed(result.manufacturing.hidden_finger_pocket_depth)} / ${measureFixed(result.manufacturing.pocket_depth)}`
+      : hasHiddenPockets ? measureFixed(result.manufacturing.hidden_finger_pocket_depth)
+      : result.manufacturing.has_bottom_groove
+        ? measureFixed(result.manufacturing.pocket_depth)
+        : bottomTypeLabels[spec.bottom_type];
     document.querySelector("#dogboneSize").textContent = result.manufacturing.dogbones_enabled
       ? measure(result.manufacturing.dogbone_diameter)
       : "Off";
@@ -410,13 +431,14 @@ function partMesh(part, diagnostic = false) {
   const cacheKey = diagnostic ? "_diagnosticMesh" : "_mesh";
   if (part[cacheKey]) return part[cacheKey];
   const profile = diagnostic ? part.diagnostic_profile ?? part.profile : part.profile;
-  const grooves = part.operations.filter((operation) => operation.type === "groove");
+  const grooves = part.operations.filter((operation) => ["groove", "hidden_finger_pocket"].includes(operation.type));
+  const hiddenFingerReliefs = part.operations.filter((operation) => operation.type === "hidden_finger_relief");
   if (!diagnostic && part.mitered_edges) {
     const mesh = miteredExtrusionMesh(profile, part.thickness);
     part[cacheKey] = mesh;
     return mesh;
   }
-  if (!diagnostic && !grooves.length) {
+  if (!diagnostic && !grooves.length && !hiddenFingerReliefs.length) {
     const mesh = directExtrusionMesh(profile, part.thickness);
     part[cacheKey] = mesh;
     return mesh;
@@ -429,6 +451,16 @@ function partMesh(part, diagnostic = false) {
     uCoordinates.push(gx, gx + gw);
     vCoordinates.push(gy, gy + gh);
     qCoordinates.push(Math.max(0, part.thickness - groove.depth));
+  }
+  for (const relief of hiddenFingerReliefs) {
+    // Eight angular samples keep the cell mesh responsive while giving the
+    // small cutter reliefs a visibly rounded profile in the 3D preview.
+    for (let step = 0; step < 8; step += 1) {
+      const angle = step * Math.PI / 4;
+      uCoordinates.push(relief.cx + Math.cos(angle) * relief.radius);
+      vCoordinates.push(relief.cy + Math.sin(angle) * relief.radius);
+    }
+    qCoordinates.push(Math.max(0, part.thickness - relief.depth));
   }
   const us = uniqueCoordinates(uCoordinates);
   const vs = uniqueCoordinates(vCoordinates);
@@ -443,13 +475,21 @@ function partMesh(part, diagnostic = false) {
         const v = (vs[vi] + vs[vi + 1]) / 2;
         const q = (qs[qi] + qs[qi + 1]) / 2;
         if (!pointInsideProfile(u, v, profile)) continue;
-        const removed = grooves.some((groove) => {
+        const removedByGroove = grooves.some((groove) => {
           const [gx, gy, gw, gh] = groove.rect;
           return u > gx - 1e-8 && u < gx + gw + 1e-8
             && v > gy - 1e-8 && v < gy + gh + 1e-8
             && q > part.thickness - groove.depth - 1e-8;
         });
-        if (!removed) occupied.add(key(ui, vi, qi));
+        const removedByHiddenFingerRelief = hiddenFingerReliefs.some((relief) => {
+          const deltaU = u - relief.cx;
+          const deltaV = v - relief.cy;
+          return Math.abs(deltaU) < relief.radius + 1e-8
+            && Math.abs(deltaV) < relief.radius + 1e-8
+            && deltaU ** 2 + deltaV ** 2 < relief.radius ** 2 + 1e-8
+            && q > part.thickness - relief.depth - 1e-8;
+        });
+        if (!removedByGroove && !removedByHiddenFingerRelief) occupied.add(key(ui, vi, qi));
       }
     }
   }
@@ -1088,6 +1128,7 @@ function drawDrawing() {
   const styles = {
     CUT_OUTSIDE: { color: "#e9ede5", width: 1.05, dash: [] },
     POCKET_BOTTOM_SLOT: { color: "#72d8d3", width: 1, dash: [5, 3] },
+    POCKET_HIDDEN_FINGERS: { color: "#72d8d3", width: 1, dash: [5, 3] },
     MITER_END: { color: "#f1b65c", width: 1, dash: [6, 3] },
     ANNOTATION: { color: "#748073", width: 1, dash: [] },
   };

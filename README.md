@@ -47,18 +47,23 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
   and unit selection. DXFs made before this feature remain valid but have no
   dimension-reference setting and therefore load as exterior dimensions.
 - `CUT_OUTSIDE` contains the four wall profiles and the bottom profile when one is selected.
-- Wall corners can use finger joints, 45-degree miters, or either orientation of
-  a butt joint, allowing the exposed end grain to face front/back or side/side.
+- Wall corners can use through fingers, hidden fingers, 45-degree miters, or
+  either orientation of a butt joint. Hidden fingers alternate blind pockets
+  behind thin exterior skins so the assembled corner stays clean.
 - `MITER_END` contains dashed reference lines one wall thickness in from each
   mitered edge, showing where each 45-degree bevel ends. This layer is a guide
   and should not be cut.
-- Five bottom constructions are available: none, captured, full-footprint
-  butt-bottom, wall-inset butt-inside, and finger jointed. Butt-bottom shortens
-  the walls by the bottom material thickness so every mode preserves the entered
-  outside height.
+- Six bottom constructions are available: none, captured, full-footprint
+  butt-bottom, wall-inset butt-inside, through-finger jointed, and hidden-finger
+  jointed. The hidden version fits shortened bottom tabs into blind pockets on
+  the inside faces of all four walls. Butt-bottom shortens the walls by the
+  bottom material thickness so every mode preserves the entered outside height.
 - `POCKET_BOTTOM_SLOT_<depth><unit>` contains the captured-bottom grooves. The
   calculated pocket depth is included to three decimal places in the layer name,
   such as `POCKET_BOTTOM_SLOT_0.271IN`, and is also shown in the app.
+- `POCKET_HIDDEN_FINGERS_<depth><unit>` contains the blind wall and bottom-joint
+  pockets. Their depth is the wall material thickness minus the selected hidden
+  skin thickness.
 - The calculated pocket depth is the requested bottom-slot depth plus the slot
   extra; the requested depth remains the captured bottom's engagement distance.
 - Bottom slot offset controls the distance from the bottom edge of each wall panel to the lower edge of the captured-bottom groove.
@@ -67,7 +72,8 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
   defaults to a 1/8-inch (3.175 mm) bit. Finger clearance defaults to 0.01 inch
   (0.254 mm), is added to each socket's total width and depth, and shifts the
   dogbone center the same distance back toward the corner along its 45-degree
-  bisector.
+  bisector. Hidden fingers also leave this clearance between each concealed
+  finger end and the neighboring exterior skin.
 - `ANNOTATION` contains part labels and should not be cut.
 
 The layout intentionally leaves CAM operations, feeds, speeds, hold-down tabs, kerf compensation, and stock nesting to the machine operator. Always verify the file in your CAM package and make a test joint before cutting final material.

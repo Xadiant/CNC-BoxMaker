@@ -4,14 +4,17 @@ const FIELD_RULES = {
   depth: [50, 1500, null],
   finger_size: [3, 100, 12.7],
   finger_clearance: [0, 10, 0.254],
+  hidden_finger_skin: [0.5, 50, 1.5875],
   wall_thickness: [3, 50, 12.7],
   bottom_thickness: [1, 30, 6.35],
   bottom_slot_extra: [0, 10, 0.53975],
   bottom_slot_depth: [0.1, 50, 6.35],
   cutter_diameter: [0.1, 50, 3.175],
 };
-const BOTTOM_TYPES = new Set(["none", "captured", "butt_bottom", "butt_inside", "finger_jointed"]);
-const WALL_CONNECTIONS = new Set(["finger", "miter", "butt_front_back", "butt_sides"]);
+const BOTTOM_TYPES = new Set([
+  "none", "captured", "butt_bottom", "butt_inside", "finger_jointed", "hidden_finger_jointed",
+]);
+const WALL_CONNECTIONS = new Set(["finger", "hidden_finger", "miter", "butt_front_back", "butt_sides"]);
 const DIMENSION_BASES = new Set(["exterior", "interior"]);
 
 function distance(first, second) {
@@ -60,13 +63,13 @@ export function validateSpec(values) {
 
   const bottomType = values.bottom_type ?? "captured";
   if (!BOTTOM_TYPES.has(bottomType)) {
-    throw new Error("bottom type must be none, captured, butt-bottom, butt-inside, or finger jointed");
+    throw new Error("bottom type must be none, captured, butt-bottom, butt-inside, finger jointed, or hidden fingers");
   }
   spec.bottom_type = bottomType;
 
   const wallConnection = values.wall_connection ?? "finger";
   if (!WALL_CONNECTIONS.has(wallConnection)) {
-    throw new Error("wall connection must be finger, miter, butt-front/back, or butt-sides");
+    throw new Error("wall connection must be finger, hidden finger, miter, butt-front/back, or butt-sides");
   }
   spec.wall_connection = wallConnection;
 
@@ -102,6 +105,14 @@ export function validateSpec(values) {
     - (spec.bottom_type === "butt_bottom" ? spec.bottom_thickness : 0);
   if (spec.finger_size > wallPanelHeight / 2) {
     throw new Error("finger size must be no more than half the box height");
+  }
+  const usesHiddenFingers = spec.bottom_type === "hidden_finger_jointed"
+    || spec.wall_connection === "hidden_finger";
+  if (usesHiddenFingers && spec.hidden_finger_skin >= spec.wall_thickness) {
+    throw new Error("hidden finger skin must be thinner than the wall material");
+  }
+  if (usesHiddenFingers && spec.finger_clearance >= spec.wall_thickness - spec.hidden_finger_skin) {
+    throw new Error("finger clearance must be smaller than the hidden finger pocket depth");
   }
   if (spec.bottom_type === "captured") {
     if (spec.bottom_slot_depth + spec.bottom_slot_extra > spec.wall_thickness) {
@@ -192,6 +203,27 @@ export function edgePoints(start, end, mode, targetSize, depth, phase = 0, clear
   }
   if (!samePoint(points.at(-1), [x1, y1])) points.push([x1, y1]);
   return { points, dogbones };
+}
+
+function fingerPocketIntervals(length, targetSize, phase = 0, clearance = 0) {
+  let segmentCount = Math.max(3, roundHalfEven(length / targetSize));
+  if (segmentCount % 2 === 0) segmentCount += 1;
+  const segment = length / segmentCount;
+  if (clearance >= segment) throw new Error("finger clearance must be smaller than each finger");
+
+  const boundaries = Array.from({ length: segmentCount + 1 }, (_, index) => segment * index);
+  if (clearance > 0) {
+    for (let index = 1; index < segmentCount; index += 1) {
+      const previousActive = (index - 1 + phase) % 2 === 0;
+      const nextActive = (index + phase) % 2 === 0;
+      if (previousActive !== nextActive) {
+        boundaries[index] += previousActive ? clearance / 2 : -clearance / 2;
+      }
+    }
+  }
+  return Array.from({ length: segmentCount }, (_, index) => (
+    (index + phase) % 2 === 0 ? [boundaries[index], boundaries[index + 1]] : null
+  )).filter(Boolean);
 }
 
 function cleanPolyline(points, { closed, tolerance = 1e-9 }) {
@@ -356,12 +388,124 @@ function dogboneOutline(points, radius, offset = 0, maximumArcStep = Math.PI / 8
   return { outline, bulges, operations };
 }
 
+function dogbonePocketOutline(points, reliefIndices, radius, offset = 0, maximumArcStep = Math.PI / 8) {
+  if (!reliefIndices.length || radius <= 0) {
+    return { outline: points.map((point) => [...point]), bulges: points.map(() => 0), operations: [] };
+  }
+  if (offset >= radius) throw new Error("finger clearance must be smaller than the cutter radius");
+
+  const reliefs = new Map();
+  for (const index of reliefIndices) {
+    const current = points[index];
+    const previous = points[(index - 1 + points.length) % points.length];
+    const following = points[(index + 1) % points.length];
+    const incomingLength = distance(previous, current);
+    const outgoingLength = distance(current, following);
+    const incoming = [
+      (current[0] - previous[0]) / incomingLength,
+      (current[1] - previous[1]) / incomingLength,
+    ];
+    const outgoing = [
+      (following[0] - current[0]) / outgoingLength,
+      (following[1] - current[1]) / outgoingLength,
+    ];
+    const pocketBisector = [outgoing[0] - incoming[0], outgoing[1] - incoming[1]];
+    const bisectorLength = Math.hypot(...pocketBisector);
+    if (bisectorLength <= 1e-9) throw new Error("dogbone relief requires a valid pocket corner");
+    const centerOffset = pocketBisector.map((value) => value / bisectorLength * (radius - offset));
+    const center = [current[0] + centerOffset[0], current[1] + centerOffset[1]];
+    const centerDistanceSquared = centerOffset[0] ** 2 + centerOffset[1] ** 2;
+    const edgeTrim = (direction) => {
+      const projection = direction[0] * centerOffset[0] + direction[1] * centerOffset[1];
+      const discriminant = radius ** 2 - (centerDistanceSquared - projection ** 2);
+      if (discriminant < -1e-9) {
+        throw new Error("finger clearance is too large for the selected cutter diameter");
+      }
+      return projection + Math.sqrt(Math.max(0, discriminant));
+    };
+    reliefs.set(index, {
+      type: "hidden_finger_relief",
+      cx: center[0],
+      cy: center[1],
+      corner: [...current],
+      radius,
+      incoming_trim: edgeTrim([-incoming[0], -incoming[1]]),
+      outgoing_trim: edgeTrim(outgoing),
+    });
+  }
+
+  for (let index = 0; index < points.length; index += 1) {
+    const endIndex = (index + 1) % points.length;
+    const required = (reliefs.get(index)?.outgoing_trim ?? 0)
+      + (reliefs.get(endIndex)?.incoming_trim ?? 0);
+    if (required && distance(points[index], points[endIndex]) <= required + 1e-9) {
+      throw new Error("cutter diameter is too large for the selected hidden finger pockets");
+    }
+  }
+
+  const outline = [];
+  const bulges = [];
+  const appendPoint = (point, incomingBulge = 0) => {
+    if (outline.length) bulges[bulges.length - 1] = incomingBulge;
+    outline.push(point);
+    bulges.push(0);
+  };
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index];
+    if (!reliefs.has(index)) {
+      appendPoint([...current]);
+      continue;
+    }
+    const previous = points[(index - 1 + points.length) % points.length];
+    const following = points[(index + 1) % points.length];
+    const incomingLength = distance(previous, current);
+    const outgoingLength = distance(current, following);
+    const incoming = [
+      (current[0] - previous[0]) / incomingLength,
+      (current[1] - previous[1]) / incomingLength,
+    ];
+    const outgoing = [
+      (following[0] - current[0]) / outgoingLength,
+      (following[1] - current[1]) / outgoingLength,
+    ];
+    const relief = reliefs.get(index);
+    const center = [relief.cx, relief.cy];
+    const start = [
+      current[0] - incoming[0] * relief.incoming_trim,
+      current[1] - incoming[1] * relief.incoming_trim,
+    ];
+    const end = [
+      current[0] + outgoing[0] * relief.outgoing_trim,
+      current[1] + outgoing[1] * relief.outgoing_trim,
+    ];
+    appendPoint(start);
+    const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0]);
+    const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0]);
+    let sweep = positiveModulo(endAngle - startAngle, Math.PI * 2);
+    if (sweep <= 1e-9) sweep = Math.PI * 2;
+    const segmentCount = Math.max(1, Math.ceil(sweep / maximumArcStep - 1e-12));
+    const segmentSweep = sweep / segmentCount;
+    const segmentBulge = Math.tan(segmentSweep / 4);
+    for (let step = 1; step <= segmentCount; step += 1) {
+      const angle = startAngle + segmentSweep * step;
+      appendPoint([
+        center[0] + Math.cos(angle) * radius,
+        center[1] + Math.sin(angle) * radius,
+      ], segmentBulge);
+    }
+  }
+
+  const operations = [...reliefs.values()].map(({ incoming_trim, outgoing_trim, ...operation }) => operation);
+  return { outline, bulges, operations };
+}
+
 function fingeredPanel({
   x,
   y,
   width,
   height,
   verticalMode,
+  verticalJointDepth = jointDepth,
   fingerSize,
   jointDepth,
   label,
@@ -375,15 +519,21 @@ function fingeredPanel({
   bottomJointInsets = [0, 0],
   bottomPhase = 0,
   miteredEdges = false,
+  hiddenVerticalPockets = false,
+  hiddenVerticalPocketPhase = 0,
+  hiddenVerticalPocketReach = null,
+  hiddenVerticalPocketBaseReach = 0,
+  hiddenBottomPockets = false,
+  hiddenPocketDepth = 0,
 }) {
   const [bottomStartInset, bottomEndInset] = bottomJointInsets;
   const corners = [
     [[0, 0], [bottomStartInset, 0], "plain", 0, jointDepth, 0],
     [[bottomStartInset, 0], [width - bottomEndInset, 0], bottomMode, bottomPhase, bottomJointDepth, fingerClearance],
     [[width - bottomEndInset, 0], [width, 0], "plain", 0, jointDepth, 0],
-    [[width, 0], [width, height], verticalMode, 0, jointDepth, fingerClearance],
+    [[width, 0], [width, height], verticalMode, 0, verticalJointDepth, fingerClearance],
     [[width, height], [0, height], "plain", 0, jointDepth, 0],
-    [[0, height], [0, 0], verticalMode, 0, jointDepth, fingerClearance],
+    [[0, height], [0, 0], verticalMode, 0, verticalJointDepth, fingerClearance],
   ];
   const outline = [];
   for (const [start, end, mode, phase, depth, clearance] of corners) {
@@ -426,6 +576,91 @@ function fingeredPanel({
         [x + gx, y + gy + gh],
       ],
     });
+  }
+  const addHiddenPocket = (rect, openSide) => {
+    let [px, py, pw, ph] = rect;
+    const right = Math.min(width, px + pw);
+    const top = Math.min(height, py + ph);
+    px = Math.max(0, px);
+    py = Math.max(0, py);
+    pw = right - px;
+    ph = top - py;
+    if (pw <= 0 || ph <= 0) return;
+    operations.push({ type: "hidden_finger_pocket", rect: [px, py, pw, ph], depth: hiddenPocketDepth });
+    const pocketOutline = [
+      [px, py],
+      [px + pw, py],
+      [px + pw, py + ph],
+      [px, py + ph],
+    ];
+    const reliefIndices = [];
+    if (openSide === "left") {
+      if (py > 1e-9) reliefIndices.push(1);
+      if (py + ph < height - 1e-9) reliefIndices.push(2);
+    } else if (openSide === "right") {
+      if (py > 1e-9) reliefIndices.push(0);
+      if (py + ph < height - 1e-9) reliefIndices.push(3);
+    } else {
+      if (px + pw < width - 1e-9) reliefIndices.push(2);
+      if (px > 1e-9) reliefIndices.push(3);
+    }
+    const routedPocket = useDogbones
+      ? dogbonePocketOutline(pocketOutline, reliefIndices, cutterDiameter / 2, fingerClearance)
+      : { outline: pocketOutline, bulges: pocketOutline.map(() => 0), operations: [] };
+    operations.push(...routedPocket.operations.map((operation) => ({
+      ...operation,
+      depth: hiddenPocketDepth,
+    })));
+    entities.push({
+      type: "polyline",
+      layer: "POCKET_HIDDEN_FINGERS",
+      closed: true,
+      points: routedPocket.outline.map(([pointX, pointY]) => [x + pointX, y + pointY]),
+      bulges: routedPocket.bulges,
+    });
+  };
+  if (hiddenVerticalPockets) {
+    const reach = hiddenVerticalPocketReach ?? jointDepth + fingerClearance;
+    if (hiddenVerticalPocketBaseReach > 0) {
+      addHiddenPocket([0, 0, hiddenVerticalPocketBaseReach, height], "left");
+      addHiddenPocket([
+        width - hiddenVerticalPocketBaseReach,
+        0,
+        hiddenVerticalPocketBaseReach,
+        height,
+      ], "right");
+    }
+    for (const [start, end] of fingerPocketIntervals(
+      height,
+      fingerSize,
+      hiddenVerticalPocketPhase,
+      fingerClearance,
+    )) {
+      addHiddenPocket([
+        hiddenVerticalPocketBaseReach,
+        start,
+        reach - hiddenVerticalPocketBaseReach,
+        end - start,
+      ], "left");
+      addHiddenPocket([
+        width - reach,
+        start,
+        reach - hiddenVerticalPocketBaseReach,
+        end - start,
+      ], "right");
+    }
+  }
+  if (hiddenBottomPockets) {
+    const reach = bottomJointDepth + fingerClearance;
+    const runLength = width - bottomStartInset - bottomEndInset;
+    for (const [start, end] of fingerPocketIntervals(runLength, fingerSize, bottomPhase, fingerClearance)) {
+      addHiddenPocket([
+        bottomStartInset + start,
+        0,
+        end - start,
+        reach,
+      ], "bottom");
+    }
   }
   if (miteredEdges) {
     for (const endX of [jointDepth, width - jointDepth]) {
@@ -561,20 +796,27 @@ export function buildLayout(values) {
   const hasBottom = spec.bottom_type !== "none";
   const capturedBottom = spec.bottom_type === "captured";
   const fingerJointedBottom = spec.bottom_type === "finger_jointed";
-  const fingerWalls = spec.wall_connection === "finger";
+  const hiddenFingerBottom = spec.bottom_type === "hidden_finger_jointed";
+  const hasFingerBottom = fingerJointedBottom || hiddenFingerBottom;
+  const hiddenFingerWalls = spec.wall_connection === "hidden_finger";
+  const fingerWalls = spec.wall_connection === "finger" || hiddenFingerWalls;
   const miteredWalls = spec.wall_connection === "miter";
+  const hiddenPocketDepth = wall - spec.hidden_finger_skin;
+  const hiddenTabDepth = hiddenPocketDepth - spec.finger_clearance;
   const clearance = capturedBottom ? spec.bottom_slot_extra : 0;
   const slotHeight = capturedBottom ? spec.bottom_thickness + clearance : 0;
   const slotY = capturedBottom ? spec.bottom_slot_offset : 0;
   const pocketDepth = capturedBottom ? roundTo(spec.bottom_slot_depth + clearance, 12) : 0;
   const slotExtension = pocketDepth;
   const engagement = capturedBottom ? spec.bottom_slot_depth : 0;
-  const fullWidthFronts = miteredWalls || spec.wall_connection === "butt_sides";
+  const fullWidthFronts = miteredWalls || hiddenFingerWalls || spec.wall_connection === "butt_sides";
   const insetSides = spec.wall_connection === "butt_sides";
   const frontWidth = fullWidthFronts ? spec.width : spec.width - 2 * wall;
-  const sideWidth = insetSides ? spec.depth - 2 * wall : spec.depth;
+  const sideWidth = hiddenFingerWalls
+    ? spec.depth - 2 * spec.hidden_finger_skin
+    : insetSides ? spec.depth - 2 * wall : spec.depth;
   const frontOriginX = fullWidthFronts ? 0 : wall;
-  const sideOriginY = insetSides ? wall : 0;
+  const sideOriginY = hiddenFingerWalls ? spec.hidden_finger_skin : insetSides ? wall : 0;
   const gap = Math.max(18, wall * 3);
   const margin = 20;
   const wallBaseZ = spec.bottom_type === "butt_bottom" ? spec.bottom_thickness : 0;
@@ -585,22 +827,25 @@ export function buildLayout(values) {
     height: wallHeight,
     fingerSize: spec.finger_size,
     jointDepth: wall,
+    verticalJointDepth: wall,
     grooveDepth: pocketDepth,
     cutterDiameter: spec.cutter_diameter,
     fingerClearance: spec.finger_clearance,
     useDogbones: spec.use_dogbones,
     bottomMode: fingerJointedBottom ? "slot" : "plain",
     bottomJointDepth: spec.bottom_thickness,
-    bottomPhase: fingerJointedBottom ? 1 : 0,
+    bottomPhase: hasFingerBottom ? 1 : 0,
+    hiddenBottomPockets: hiddenFingerBottom,
+    hiddenPocketDepth,
     miteredEdges: miteredWalls,
   };
   const capturedGroove = (origin, axisLength) => capturedBottom
     ? [wall - slotExtension - origin, slotY, axisLength - 2 * wall + 2 * slotExtension, slotHeight]
     : null;
-  const frontBottomInsets = fingerJointedBottom
+  const frontBottomInsets = hasFingerBottom
     ? [wall - frontOriginX, frontOriginX + frontWidth - (spec.width - wall)]
     : [0, 0];
-  const sideBottomInsets = fingerJointedBottom
+  const sideBottomInsets = hasFingerBottom
     ? [wall - sideOriginY, sideOriginY + sideWidth - (spec.depth - wall)]
     : [0, 0];
   const placements = [
@@ -609,7 +854,11 @@ export function buildLayout(values) {
       x: margin,
       y: margin,
       width: frontWidth,
-      verticalMode: fingerWalls ? "tab" : "plain",
+      verticalMode: fingerWalls && !hiddenFingerWalls ? "tab" : "plain",
+      hiddenVerticalPockets: hiddenFingerWalls,
+      hiddenVerticalPocketPhase: 0,
+      hiddenVerticalPocketReach: wall + spec.finger_clearance,
+      hiddenVerticalPocketBaseReach: spec.hidden_finger_skin + spec.finger_clearance,
       label: "FRONT",
       groove: capturedGroove(frontOriginX, spec.width),
       bottomJointInsets: frontBottomInsets,
@@ -619,7 +868,11 @@ export function buildLayout(values) {
       x: margin,
       y: margin + wallHeight + gap,
       width: frontWidth,
-      verticalMode: fingerWalls ? "tab" : "plain",
+      verticalMode: fingerWalls && !hiddenFingerWalls ? "tab" : "plain",
+      hiddenVerticalPockets: hiddenFingerWalls,
+      hiddenVerticalPocketPhase: 0,
+      hiddenVerticalPocketReach: wall + spec.finger_clearance,
+      hiddenVerticalPocketBaseReach: spec.hidden_finger_skin + spec.finger_clearance,
       label: "BACK",
       groove: capturedGroove(frontOriginX, spec.width),
       bottomJointInsets: frontBottomInsets,
@@ -629,7 +882,11 @@ export function buildLayout(values) {
       x: margin + spec.width + wall + gap,
       y: margin,
       width: sideWidth,
-      verticalMode: fingerWalls ? "slot" : "plain",
+      verticalMode: fingerWalls && !hiddenFingerWalls ? "slot" : "plain",
+      hiddenVerticalPockets: hiddenFingerWalls,
+      hiddenVerticalPocketPhase: 1,
+      hiddenVerticalPocketReach: wall - spec.hidden_finger_skin + spec.finger_clearance,
+      hiddenVerticalPocketBaseReach: spec.finger_clearance,
       label: "LEFT SIDE",
       groove: capturedGroove(sideOriginY, spec.depth),
       bottomJointInsets: sideBottomInsets,
@@ -639,7 +896,11 @@ export function buildLayout(values) {
       x: margin + spec.width + wall + gap,
       y: margin + wallHeight + gap,
       width: sideWidth,
-      verticalMode: fingerWalls ? "slot" : "plain",
+      verticalMode: fingerWalls && !hiddenFingerWalls ? "slot" : "plain",
+      hiddenVerticalPockets: hiddenFingerWalls,
+      hiddenVerticalPocketPhase: 1,
+      hiddenVerticalPocketReach: wall - spec.hidden_finger_skin + spec.finger_clearance,
+      hiddenVerticalPocketBaseReach: spec.finger_clearance,
       label: "RIGHT SIDE",
       groove: capturedGroove(sideOriginY, spec.depth),
       bottomJointInsets: sideBottomInsets,
@@ -686,6 +947,14 @@ export function buildLayout(values) {
       edgeMode: "tab",
       jointDepth: wall,
       label: "FINGER-JOINTED BOTTOM",
+      assemblyOrigin: [wall, wall, 0],
+    },
+    hidden_finger_jointed: {
+      coreWidth: spec.width - 2 * wall,
+      coreDepth: spec.depth - 2 * wall,
+      edgeMode: "tab",
+      jointDepth: hiddenTabDepth,
+      label: "HIDDEN-FINGER BOTTOM",
       assemblyOrigin: [wall, wall, 0],
     },
   };
@@ -738,6 +1007,10 @@ export function buildLayout(values) {
       dogbones_enabled: spec.use_dogbones,
       dogbone_diameter: roundTo(spec.cutter_diameter, 3),
       finger_clearance: roundTo(spec.finger_clearance, 3),
+      hidden_finger_skin: roundTo(spec.hidden_finger_skin, 3),
+      hidden_finger_pocket_depth: (hiddenFingerWalls || hiddenFingerBottom)
+        ? roundTo(hiddenPocketDepth, 3)
+        : 0,
       pocket_depth: pocketDepth,
       groove_depth: roundTo(pocketDepth, 3),
       groove_width: roundTo(slotHeight, 3),

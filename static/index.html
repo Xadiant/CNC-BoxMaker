@@ -38,6 +38,7 @@
               <span>Corner joint</span>
               <select id="wall_connection" name="wall_connection">
                 <option value="finger" selected>Finger joints</option>
+                <option value="hidden_finger">Hidden fingers</option>
                 <option value="miter">Mitered edges</option>
                 <option value="butt_front_back">Butted · front/back</option>
                 <option value="butt_sides">Butted · side/side</option>
@@ -56,6 +57,7 @@
                 <option value="butt_bottom">Butt-bottom</option>
                 <option value="butt_inside">Butt-inside</option>
                 <option value="finger_jointed">Finger jointed</option>
+                <option value="hidden_finger_jointed">Hidden fingers</option>
               </select>
             </label>
             <p id="bottomTypeHelp" class="control-help">Rides in grooves routed into all four walls.</p>
@@ -107,6 +109,10 @@
               <label for="finger_clearance">Finger clearance <span>G</span></label>
               <div class="input-wrap"><input id="finger_clearance" name="finger_clearance" type="number" value="0.01" min="0" max="0.3937" step="0.001" /><em>in</em></div>
             </div>
+            <div class="field-row hidden-finger-setting" hidden>
+              <label for="hidden_finger_skin">Hidden skin <span>S</span></label>
+              <div class="input-wrap"><input id="hidden_finger_skin" name="hidden_finger_skin" type="number" value="0.0625" min="0.01969" max="1.9685" step="0.001" /><em>in</em></div>
+            </div>
             <div class="field-row captured-setting">
               <label for="bottom_slot_extra">Bottom slot extra <span>C</span></label>
               <div class="input-wrap"><input id="bottom_slot_extra" name="bottom_slot_extra" type="number" value="0.02125" min="0" max="0.3937" step="0.00001" /><em>in</em></div>
@@ -140,7 +146,7 @@
         </button>
         <button id="importSettingsButton" class="import-button" type="button">Load settings from DXF</button>
         <input id="dxfSettingsFile" type="file" accept=".dxf,application/dxf" hidden />
-        <p class="fine-print">Exports include these settings for later reload. Finger clearance is added to each socket's total width and depth, split evenly between its two side faces; when dogbones are enabled, it also shifts them back toward the corner at 45°. Captured-bottom slot offset is measured from the panel bottom to the lower edge of the groove.</p>
+        <p class="fine-print">Exports include these settings for later reload. Finger clearance is added around each socket and between hidden fingers and the neighboring exterior skin. Hidden skin is the material left on the exterior face of a blind finger pocket. Captured-bottom slot offset is measured from the panel bottom to the lower edge of the groove.</p>
 
         <fieldset class="piece-drawing">
           <legend>Pieces to draw <span id="pieceDrawingCount">5 of 5</span></legend>
@@ -183,7 +189,7 @@
         <div class="viewer-footer" id="modelLegend">
           <div class="assembly-legend-item"><span class="swatch wall"></span>Wall material</div>
           <div class="assembly-legend-item" id="bottomLegend"><span class="swatch bottom"></span><span id="bottomLegendLabel">Captured bottom</span></div>
-          <div class="assembly-legend-item" id="grooveLegend"><span class="swatch groove"></span>Bottom groove</div>
+          <div class="assembly-legend-item" id="grooveLegend"><span class="swatch groove"></span><span id="grooveLegendLabel">Bottom groove</span></div>
           <div class="overlap-legend-item"><span class="swatch overlap"></span>Physical overlap</div>
           <div class="empty-legend-item"><span class="swatch empty"></span>Unexpected empty space</div>
         </div>

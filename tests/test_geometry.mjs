@@ -110,6 +110,7 @@ test("missing optional values retain the established inch-derived defaults", () 
   const spec = validateSpec({ height: 152.4, width: 457.2, depth: 406.4 });
   assert.equal(spec.finger_size, 12.7);
   assert.equal(spec.finger_clearance, 0.254);
+  assert.equal(spec.hidden_finger_skin, 1.5875);
   assert.equal(spec.wall_thickness, 12.7);
   assert.equal(spec.bottom_thickness, 6.35);
   assert.equal(spec.bottom_slot_extra, 0.53975);
@@ -129,6 +130,7 @@ test("interior dimensions expand to the required exterior extents", () => {
     butt_bottom: DEFAULT.height + DEFAULT.bottom_thickness,
     butt_inside: DEFAULT.height + DEFAULT.bottom_thickness,
     finger_jointed: DEFAULT.height + DEFAULT.bottom_thickness,
+    hidden_finger_jointed: DEFAULT.height + DEFAULT.bottom_thickness,
   };
   for (const [bottomType, expectedHeight] of Object.entries(expectedHeights)) {
     const layout = buildLayout({
@@ -157,6 +159,7 @@ test("exterior dimensions report the resulting clear interior size", () => {
     butt_bottom: DEFAULT.height - DEFAULT.bottom_thickness,
     butt_inside: DEFAULT.height - DEFAULT.bottom_thickness,
     finger_jointed: DEFAULT.height - DEFAULT.bottom_thickness,
+    hidden_finger_jointed: DEFAULT.height - DEFAULT.bottom_thickness,
   };
   for (const [bottomType, expectedHeight] of Object.entries(expectedHeights)) {
     const layout = buildLayout({ ...DEFAULT, bottom_type: bottomType });
@@ -379,6 +382,157 @@ test("finger-jointed bottom interlocks with all four wall bottoms", () => {
   assert.ok(layoutToDxf(layout).includes("999\nbottom_type=finger_jointed"));
 });
 
+test("hidden wall fingers alternate blind pockets behind clean exterior skins", () => {
+  const skin = 2;
+  const layout = buildLayout({
+    ...DEFAULT,
+    bottom_type: "none",
+    wall_connection: "hidden_finger",
+    hidden_finger_skin: skin,
+  });
+  const [front, back, left, right] = layout.parts;
+  const pocketDepth = DEFAULT.wall_thickness - skin;
+
+  assert.ok(layout.parts.every((part) => part.profile.length === 4));
+  assert.deepEqual(layout.parts.map((part) => part.width), [450, 450, 396, 396]);
+  assert.deepEqual(layout.parts.map((part) => part.assembly.origin.slice(0, 2)), [
+    [0, 0], [0, 400], [0, 2], [450, 2],
+  ]);
+  assert.ok([front, back, left, right].every((part) =>
+    part.operations.some((operation) => operation.type === "hidden_finger_pocket")
+  ));
+  assert.ok(layout.parts.flatMap((part) => part.operations)
+    .filter((operation) => operation.type === "hidden_finger_pocket")
+    .every((operation) => operation.depth === pocketDepth));
+  const frontPockets = front.operations.filter((operation) => operation.type === "hidden_finger_pocket");
+  const frontSkinPocket = frontPockets.find((operation) => operation.rect[3] === DEFAULT.height);
+  const frontPocket = frontPockets.find((operation) => operation.rect[3] !== DEFAULT.height);
+  const sidePockets = left.operations.filter((operation) => operation.type === "hidden_finger_pocket");
+  const sideSkinPocket = sidePockets.find((operation) => operation.rect[3] === DEFAULT.height);
+  const sidePocket = sidePockets.find((operation) => operation.rect[3] !== DEFAULT.height);
+  close(frontPocket.rect[0] + frontPocket.rect[2], DEFAULT.wall_thickness + 0.254);
+  close(frontSkinPocket.rect[2], skin + 0.254);
+  assert.equal(frontSkinPocket.rect[3], DEFAULT.height);
+  close(sideSkinPocket.rect[2], 0.254);
+  close(sidePocket.rect[0] + sidePocket.rect[2], DEFAULT.wall_thickness - skin + 0.254);
+  assert.equal(frontPocket.rect[1], 0);
+  assert.ok(sidePocket.rect[1] > 0);
+  assert.equal(layout.manufacturing.hidden_finger_pocket_depth, pocketDepth);
+  assert.ok(layout.entities.some((entity) => entity.layer === "POCKET_HIDDEN_FINGERS"));
+});
+
+test("hidden-finger dogbones are integrated into pocket paths", () => {
+  const values = {
+    ...DEFAULT,
+    wall_connection: "hidden_finger",
+    bottom_type: "hidden_finger_jointed",
+    hidden_finger_skin: 2,
+  };
+  const layout = buildLayout(values);
+  const clearance = validateSpec(values).finger_clearance;
+  const pocketPaths = layout.entities.filter((entity) => entity.layer === "POCKET_HIDDEN_FINGERS");
+  assert.ok(pocketPaths.length > 0);
+  assert.ok(pocketPaths.every((entity) => entity.type === "polyline"));
+  assert.ok(pocketPaths.some((entity) => entity.bulges.some((bulge) => Math.abs(bulge) > 0)));
+  assert.ok(!layout.entities.some((entity) =>
+    entity.layer === "POCKET_HIDDEN_FINGERS" && entity.type === "circle"
+  ));
+  const bulgeRuns = pocketPaths.flatMap((entity) => {
+    const runs = [];
+    let length = 0;
+    for (const bulge of entity.bulges) {
+      if (Math.abs(bulge) > 1e-12) length += 1;
+      else if (length) {
+        runs.push(length);
+        length = 0;
+      }
+    }
+    if (length) runs.push(length);
+    return runs;
+  });
+  assert.ok(bulgeRuns.length > 0);
+  assert.ok(bulgeRuns.every((length) => length === 9));
+
+  for (const part of layout.parts.slice(0, 4)) {
+    const [offsetX, offsetY] = part.layout_origin;
+    const partPockets = part.operations.filter((operation) => operation.type === "hidden_finger_pocket");
+    for (const relief of part.operations.filter((operation) => operation.type === "hidden_finger_relief")) {
+      const center = [relief.cx + offsetX, relief.cy + offsetY];
+      const arcPoints = pocketPaths.flatMap((entity) => entity.points).filter((point) =>
+        Math.abs(Math.hypot(point[0] - center[0], point[1] - center[1]) - relief.radius) <= 1e-8
+      );
+      assert.ok(arcPoints.length >= 9);
+      assert.ok(partPockets.some((operation) => {
+        const [x, y, width, height] = operation.rect;
+        return relief.cx >= x - 1e-9 && relief.cx <= x + width + 1e-9
+          && relief.cy >= y - 1e-9 && relief.cy <= y + height + 1e-9;
+      }));
+      close(
+        Math.hypot(relief.cx - relief.corner[0], relief.cy - relief.corner[1]),
+        relief.radius - clearance,
+      );
+    }
+  }
+  assert.ok(layoutToDxf(layout).includes("\n42\n"));
+
+  const withoutDogbones = buildLayout({ ...values, use_dogbones: false });
+  const plainPocketPaths = withoutDogbones.entities.filter((entity) =>
+    entity.layer === "POCKET_HIDDEN_FINGERS"
+  );
+  assert.ok(plainPocketPaths.every((entity) =>
+    entity.type === "polyline"
+      && entity.points.length === 4
+      && entity.bulges.every((bulge) => bulge === 0)
+  ));
+  assert.ok(withoutDogbones.parts.slice(0, 4).every((part) =>
+    !part.operations.some((operation) => operation.type === "hidden_finger_relief")
+  ));
+});
+
+test("hidden-finger bottom fits blind pockets in all four walls", () => {
+  const skin = 2;
+  const layout = buildLayout({
+    ...DEFAULT,
+    wall_connection: "butt_front_back",
+    bottom_type: "hidden_finger_jointed",
+    hidden_finger_skin: skin,
+  });
+  const bottom = layout.parts.at(-1);
+  const expectedExtent = DEFAULT.width - 2 * (skin + 0.254);
+
+  assert.ok(layout.parts.slice(0, 4).every((part) =>
+    part.operations.some((operation) => operation.type === "hidden_finger_pocket")
+  ));
+  assert.ok(layout.parts.slice(0, 4).every((part) => part.profile.length === 4));
+  close(bottom.width, expectedExtent);
+  close(Math.min(...bottom.profile.map(([x]) => x)) + bottom.assembly.origin[0], skin + 0.254);
+  close(Math.max(...bottom.profile.map(([x]) => x)) + bottom.assembly.origin[0], DEFAULT.width - skin - 0.254);
+  assert.ok(layoutToDxf(layout).includes("999\nbottom_type=hidden_finger_jointed"));
+});
+
+test("hidden-finger pocket depth and skin are saved on a dedicated DXF layer", () => {
+  const layout = buildLayout({ ...DEFAULT, wall_connection: "hidden_finger", hidden_finger_skin: 2 });
+  const dxf = layoutToDxf(layout);
+  assert.ok(dxf.includes("999\nhidden_finger_skin_mm=2"));
+  assert.ok(dxf.includes("999\nwall_connection=hidden_finger"));
+  assert.match(dxf, /2\nPOCKET_HIDDEN_FINGERS_10\.000MM\n/);
+  assert.match(dxf, /8\nPOCKET_HIDDEN_FINGERS_10\.000MM\n/);
+});
+
+test("hidden-finger skin and remaining pocket depth are validated", () => {
+  assert.throws(() => buildLayout({
+    ...DEFAULT,
+    wall_connection: "hidden_finger",
+    hidden_finger_skin: DEFAULT.wall_thickness,
+  }), /skin must be thinner/);
+  assert.throws(() => buildLayout({
+    ...DEFAULT,
+    bottom_type: "hidden_finger_jointed",
+    hidden_finger_skin: 11.8,
+    finger_clearance: 0.254,
+  }), /clearance must be smaller/);
+});
+
 test("captured-only slot constraints do not block other bottom types", () => {
   assert.doesNotThrow(() => buildLayout({
     ...DEFAULT,
@@ -392,7 +546,9 @@ test("captured-only slot constraints do not block other bottom types", () => {
 });
 
 test("every bottom construction remains inside its assembled dimensions", () => {
-  for (const bottomType of ["none", "captured", "butt_bottom", "butt_inside", "finger_jointed"]) {
+  for (const bottomType of [
+    "none", "captured", "butt_bottom", "butt_inside", "finger_jointed", "hidden_finger_jointed",
+  ]) {
     const layout = buildLayout({ ...DEFAULT, bottom_type: bottomType });
     const limits = Object.values(layout.assembled_dimensions);
     for (const part of layout.parts) {
