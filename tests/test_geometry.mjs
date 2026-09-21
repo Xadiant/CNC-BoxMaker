@@ -383,6 +383,26 @@ test("mitered wall connections use full-length plain wall blanks", () => {
   assert.equal((dxf.match(/8\nMITER_END\n/g) ?? []).length, 8);
 });
 
+test("top and bottom joinery remain independent from mitered wall corners", () => {
+  const layout = buildLayout({
+    ...DEFAULT,
+    wall_connection: "miter",
+    bottom_type: "finger_jointed",
+    top_type: "hidden_finger_jointed",
+    hidden_finger_skin: 2,
+  });
+  const walls = layout.parts.slice(0, 4);
+
+  assert.ok(walls.every((part) => part.mitered_edges));
+  assert.ok(walls.every((part) => new Set(part.profile.map(([, y]) => y)).size > 2));
+  assert.ok(walls.every((part) => part.operations.some((operation) =>
+    operation.type === "hidden_finger_pocket"
+      && operation.rect[1] + operation.rect[3] === part.height
+  )));
+  assert.equal(layout.entities.filter((entity) => entity.layer === "MITER_END").length, 8);
+  assert.ok(layout.entities.some((entity) => entity.layer === "POCKET_HIDDEN_FINGERS"));
+});
+
 test("butted wall variants expose end grain on the selected pair", () => {
   const frontBack = buildLayout({ ...DEFAULT, bottom_type: "none", wall_connection: "butt_front_back" });
   assert.deepEqual(frontBack.parts.map((part) => part.width), [426, 426, 400, 400]);

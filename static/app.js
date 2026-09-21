@@ -1,6 +1,7 @@
 import { buildLayout } from "./geometry.js";
 import { layoutToDxf } from "./dxf.js";
 import { evaluateArithmetic } from "./arithmetic.js";
+import { miteredCellSpan } from "./mesh.js";
 
 const form = document.querySelector("#boxForm");
 const inputs = [...form.querySelectorAll("input[data-expression-input]")];
@@ -561,7 +562,8 @@ function generatePartMesh(part, diagnostic = false) {
     "groove", "hidden_finger_pocket", "inset_pocket",
   ].includes(operation.type));
   const hiddenFingerReliefs = part.operations.filter((operation) => operation.type === "hidden_finger_relief");
-  if (!diagnostic && part.mitered_edges) {
+  const mitered = !diagnostic && part.mitered_edges;
+  if (mitered && !grooves.length && !hiddenFingerReliefs.length) {
     return finishPartMesh(miteredExtrusionMesh(profile, part.thickness));
   }
   if (!diagnostic && !grooves.length && !hiddenFingerReliefs.length) {
@@ -586,6 +588,16 @@ function generatePartMesh(part, diagnostic = false) {
     }
     qCoordinates.push(Math.max(0, part.thickness - relief.depth));
   }
+  const profileStart = Math.min(...profile.map(([u]) => u));
+  const profileEnd = Math.max(...profile.map(([u]) => u));
+  if (mitered) {
+    for (const u of uCoordinates) {
+      const startTransition = u - profileStart;
+      const endTransition = profileEnd - u;
+      if (startTransition > 0 && startTransition < part.thickness) qCoordinates.push(startTransition);
+      if (endTransition > 0 && endTransition < part.thickness) qCoordinates.push(endTransition);
+    }
+  }
   const us = uniqueCoordinates(uCoordinates);
   const vs = uniqueCoordinates(vCoordinates);
   const qs = uniqueCoordinates(qCoordinates);
@@ -595,9 +607,13 @@ function generatePartMesh(part, diagnostic = false) {
   for (let ui = 0; ui < us.length - 1; ui++) {
     for (let vi = 0; vi < vs.length - 1; vi++) {
       for (let qi = 0; qi < qs.length - 1; qi++) {
-        const u = (us[ui] + us[ui + 1]) / 2;
-        const v = (vs[vi] + vs[vi + 1]) / 2;
         const q = (qs[qi] + qs[qi + 1]) / 2;
+        const [cellStart, cellEnd] = mitered
+          ? miteredCellSpan(us[ui], us[ui + 1], q, profileStart, profileEnd)
+          : [us[ui], us[ui + 1]];
+        if (cellEnd - cellStart <= 1e-9) continue;
+        const u = (cellStart + cellEnd) / 2;
+        const v = (vs[vi] + vs[vi + 1]) / 2;
         if (!pointInsideProfile(u, v, profile)) continue;
         const removedByGroove = grooves.some((groove) => {
           const [gx, gy, gw, gh] = groove.rect;
@@ -625,14 +641,20 @@ function generatePartMesh(part, diagnostic = false) {
     const u0 = us[ui], u1 = us[ui + 1];
     const v0 = vs[vi], v1 = vs[vi + 1];
     const q0 = qs[qi], q1 = qs[qi + 1];
+    const [lowerStart, lowerEnd] = mitered
+      ? miteredCellSpan(u0, u1, q0, profileStart, profileEnd)
+      : [u0, u1];
+    const [upperStart, upperEnd] = mitered
+      ? miteredCellSpan(u0, u1, q1, profileStart, profileEnd)
+      : [u0, u1];
     cells.push({ min: [u0, v0, q0], max: [u1, v1, q1] });
     const candidates = [
-      { neighbor: [ui - 1, vi, qi], surface: "edge", points: [[u0,v0,q0],[u0,v0,q1],[u0,v1,q1],[u0,v1,q0]] },
-      { neighbor: [ui + 1, vi, qi], surface: "edge", points: [[u1,v0,q0],[u1,v1,q0],[u1,v1,q1],[u1,v0,q1]] },
-      { neighbor: [ui, vi - 1, qi], surface: "edge", points: [[u0,v0,q0],[u1,v0,q0],[u1,v0,q1],[u0,v0,q1]] },
-      { neighbor: [ui, vi + 1, qi], surface: "edge", points: [[u0,v1,q0],[u0,v1,q1],[u1,v1,q1],[u1,v1,q0]] },
-      { neighbor: [ui, vi, qi - 1], surface: "major", points: [[u0,v0,q0],[u0,v1,q0],[u1,v1,q0],[u1,v0,q0]] },
-      { neighbor: [ui, vi, qi + 1], surface: "major", points: [[u0,v0,q1],[u1,v0,q1],[u1,v1,q1],[u0,v1,q1]] },
+      { neighbor: [ui - 1, vi, qi], surface: "edge", points: [[lowerStart,v0,q0],[upperStart,v0,q1],[upperStart,v1,q1],[lowerStart,v1,q0]] },
+      { neighbor: [ui + 1, vi, qi], surface: "edge", points: [[lowerEnd,v0,q0],[lowerEnd,v1,q0],[upperEnd,v1,q1],[upperEnd,v0,q1]] },
+      { neighbor: [ui, vi - 1, qi], surface: "edge", points: [[lowerStart,v0,q0],[lowerEnd,v0,q0],[upperEnd,v0,q1],[upperStart,v0,q1]] },
+      { neighbor: [ui, vi + 1, qi], surface: "edge", points: [[lowerStart,v1,q0],[upperStart,v1,q1],[upperEnd,v1,q1],[lowerEnd,v1,q0]] },
+      { neighbor: [ui, vi, qi - 1], surface: "major", points: [[lowerStart,v0,q0],[lowerStart,v1,q0],[lowerEnd,v1,q0],[lowerEnd,v0,q0]] },
+      { neighbor: [ui, vi, qi + 1], surface: "major", points: [[upperStart,v0,q1],[upperEnd,v0,q1],[upperEnd,v1,q1],[upperStart,v1,q1]] },
     ];
     for (const candidate of candidates) {
       if (!occupied.has(key(...candidate.neighbor))) faces.push(candidate);
@@ -640,11 +662,18 @@ function generatePartMesh(part, diagnostic = false) {
   }
 
   const lines = [];
+  const innerProfile = mitered ? profile.map(([u, v]) => [
+    Math.abs(u - profileStart) <= 1e-9 ? u + part.thickness
+      : Math.abs(u - profileEnd) <= 1e-9 ? u - part.thickness : u,
+    v,
+  ]) : profile;
   for (let index = 0; index < profile.length; index++) {
-    const current = profile[index], next = profile[(index + 1) % profile.length];
+    const nextIndex = (index + 1) % profile.length;
+    const current = profile[index], next = profile[nextIndex];
+    const innerCurrent = innerProfile[index], innerNext = innerProfile[nextIndex];
     lines.push({ color: "#49331f", points: [[...current, 0], [...next, 0]] });
-    lines.push({ color: "#49331f", points: [[...current, part.thickness], [...next, part.thickness]] });
-    lines.push({ color: "#49331f", points: [[...current, 0], [...current, part.thickness]] });
+    lines.push({ color: "#49331f", points: [[...innerCurrent, part.thickness], [...innerNext, part.thickness]] });
+    lines.push({ color: "#49331f", points: [[...current, 0], [...innerCurrent, part.thickness]] });
   }
   return finishPartMesh({ faces, lines, cells });
 }
