@@ -57,9 +57,10 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
   full-footprint butt-bottom, wall-inset butt-inside, through-finger jointed,
   and hidden-finger jointed. The inset bottom has a full exterior-size flange
   and a raised center that fits between the walls; its perimeter is pocketed by
-  the selected inset depth. The hidden-finger version fits shortened bottom
-  tabs into blind pockets on the inside faces of all four walls. Wall heights
-  are adjusted where needed so every mode preserves the entered outside height.
+  the selected inset depth. The hidden-finger version keeps a thin, continuous
+  outside skin on the bottom while its inside perimeter is pocketed into
+  alternating tabs that fit blind pockets in all four walls. Wall heights are
+  adjusted where needed so every mode preserves the entered outside height.
 - The top defaults to none and offers the same seven mirrored constructions:
   none, captured, rabbeted inset, full-footprint butt-top, wall-inset
   butt-inside, through-finger jointed, and hidden-finger jointed. Top material,
@@ -72,9 +73,11 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
   the selected joint clearance.
 - `POCKET_TOP_SLOT_<depth><unit>` and `POCKET_TOP_INSET_<depth><unit>` contain
   the corresponding captured grooves and underside inset pockets for a top.
-- `POCKET_HIDDEN_FINGERS_<depth><unit>` contains the blind wall and bottom-joint
-  pockets. Their depth is the wall material thickness minus the selected hidden
-  skin thickness.
+- `POCKET_HIDDEN_FINGERS_<depth><unit>` contains the blind pockets in the walls.
+  `POCKET_HIDDEN_BOTTOM_<depth><unit>` and
+  `POCKET_HIDDEN_TOP_<depth><unit>` contain the comb-shaped inside perimeter
+  pockets that leave continuous outside skins on those panels. Each layer name
+  uses its own material thickness minus the selected hidden skin thickness.
 - The calculated pocket depth is the requested bottom-slot depth plus the slot
   extra; the requested depth remains the captured bottom's engagement distance.
 - Bottom slot offset controls the distance from the bottom edge of each wall panel to the lower edge of the captured-bottom groove.

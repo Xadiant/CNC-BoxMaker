@@ -145,6 +145,14 @@ export function validateSpec(values) {
   if (usesHiddenFingers && spec.joint_clearance >= spec.wall_thickness - spec.hidden_finger_skin) {
     throw new Error("joint clearance must be smaller than the hidden finger pocket depth");
   }
+  if (spec.bottom_type === "hidden_finger_jointed"
+      && spec.hidden_finger_skin >= spec.bottom_thickness) {
+    throw new Error("hidden finger skin must be thinner than the bottom material");
+  }
+  if (spec.top_type === "hidden_finger_jointed"
+      && spec.hidden_finger_skin >= spec.top_thickness) {
+    throw new Error("hidden finger skin must be thinner than the top material");
+  }
   if (spec.bottom_type === "captured") {
     if (spec.bottom_slot_depth + spec.bottom_slot_extra > spec.wall_thickness) {
       throw new Error("bottom slot depth plus extra cannot exceed the wall thickness");
@@ -814,6 +822,9 @@ function panelPart({
   insetPockets = [],
   insetPocketDepth = 0,
   insetPocketLayer = "POCKET_BOTTOM_INSET",
+  hiddenPocketGroups = [],
+  hiddenPocketDepth = 0,
+  hiddenPocketLayer = "POCKET_HIDDEN_BOTTOM",
 }) {
   const edges = [
     [[0, 0], [coreWidth, 0]],
@@ -845,6 +856,36 @@ function panelPart({
     minY: Math.min(...routedOutline.outline.map(([, py]) => py)),
     maxY: Math.max(...routedOutline.outline.map(([, py]) => py)),
   };
+  const operations = [
+    ...routedOutline.operations,
+    ...insetPockets.map((rect) => ({ type: "inset_pocket", rect, depth: insetPocketDepth })),
+  ];
+  const hiddenPocketEntities = hiddenPocketGroups.map((group) => {
+    operations.push(...group.rects.map((rect) => ({
+      type: "hidden_finger_pocket",
+      rect,
+      depth: hiddenPocketDepth,
+    })));
+    const routedPocket = useDogbones
+      ? dogbonePocketOutline(
+        group.outline,
+        group.reliefIndices,
+        cutterDiameter / 2,
+        0,
+      )
+      : {
+        outline: group.outline,
+        bulges: group.outline.map(() => 0),
+        operations: [],
+      };
+    return {
+      type: "polyline",
+      layer: hiddenPocketLayer,
+      closed: true,
+      points: routedPocket.outline.map(([px, py]) => [x + px, y + py]),
+      bulges: routedPocket.bulges,
+    };
+  });
   const entities = [
     {
       type: "polyline",
@@ -867,6 +908,7 @@ function panelPart({
         ],
       };
     }),
+    ...hiddenPocketEntities,
     {
       type: "text",
       layer: "ANNOTATION",
@@ -883,14 +925,114 @@ function panelPart({
     thickness,
     profile: routedOutline.outline,
     diagnostic_profile: squareOutline,
-    operations: [
-      ...routedOutline.operations,
-      ...insetPockets.map((rect) => ({ type: "inset_pocket", rect, depth: insetPocketDepth })),
-    ],
+    operations,
     layout_origin: [x, y],
     assembly,
     entities,
   };
+}
+
+function mergePocketSegments(segments) {
+  const merged = [];
+  for (const segment of segments) {
+    const previous = merged.at(-1);
+    if (previous && Math.abs(previous.end - segment.start) <= 1e-9
+        && Math.abs(previous.reach - segment.reach) <= 1e-9) {
+      previous.end = segment.end;
+    } else {
+      merged.push({ ...segment });
+    }
+  }
+  return merged;
+}
+
+function panelFingerSegments(length, targetSize, phase, activeReach, inactiveReach) {
+  let segmentCount = Math.max(3, roundHalfEven(length / targetSize));
+  if (segmentCount % 2 === 0) segmentCount += 1;
+  const segment = length / segmentCount;
+  return Array.from({ length: segmentCount }, (_, index) => ({
+    start: segment * index,
+    end: segment * (index + 1),
+    reach: (index + phase) % 2 === 0 ? activeReach : inactiveReach,
+  }));
+}
+
+function hiddenPanelPocketGroup(segments, mapPoint, rectForSegment) {
+  const first = segments[0];
+  const last = segments.at(-1);
+  const canonical = [[first.start, 0], [last.end, 0], [last.end, last.reach]];
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const segment = segments[index];
+    canonical.push([segment.start, segment.reach]);
+    if (index > 0 && Math.abs(segment.reach - segments[index - 1].reach) > 1e-9) {
+      canonical.push([segment.start, segments[index - 1].reach]);
+    }
+  }
+  const outline = cleanPolyline(canonical, { closed: true }).map(mapPoint);
+  const reliefIndices = [];
+  for (let index = 0; index < canonical.length; index += 1) {
+    const previous = canonical[(index - 1 + canonical.length) % canonical.length];
+    const current = canonical[index];
+    const following = canonical[(index + 1) % canonical.length];
+    const incoming = [current[0] - previous[0], current[1] - previous[1]];
+    const outgoing = [following[0] - current[0], following[1] - current[1]];
+    const turn = incoming[0] * outgoing[1] - incoming[1] * outgoing[0];
+    const touchesGroupEnd = Math.abs(current[0] - first.start) <= 1e-9
+      || Math.abs(current[0] - last.end) <= 1e-9;
+    if (current[1] > 1e-9 && !touchesGroupEnd && turn > 1e-9) reliefIndices.push(index);
+  }
+  return {
+    outline,
+    reliefIndices,
+    rects: segments.map(rectForSegment),
+  };
+}
+
+function hiddenPanelPocketGroups({ width, depth, wall, skin, clearance, fingerSize }) {
+  const activeReach = skin + clearance;
+  const inactiveReach = wall + clearance;
+  const horizontalRun = width - 2 * wall;
+  const horizontal = mergePocketSegments([
+    { start: 0, end: wall, reach: inactiveReach },
+    ...panelFingerSegments(horizontalRun, fingerSize, 1, activeReach, inactiveReach)
+      .map((segment) => ({ ...segment, start: segment.start + wall, end: segment.end + wall })),
+    { start: width - wall, end: width, reach: inactiveReach },
+  ]);
+  const verticalRun = depth - 2 * wall;
+  const vertical = mergePocketSegments(panelFingerSegments(
+    verticalRun,
+    fingerSize,
+    1,
+    activeReach,
+    inactiveReach,
+  ).map((segment) => ({
+    ...segment,
+    start: Math.max(segment.start + wall, inactiveReach),
+    end: Math.min(segment.end + wall, depth - inactiveReach),
+  })).filter((segment) => segment.end - segment.start > 1e-9));
+
+  return [
+    hiddenPanelPocketGroup(
+      horizontal,
+      ([along, inward]) => [along, inward],
+      ({ start, end, reach }) => [start, 0, end - start, reach],
+    ),
+    hiddenPanelPocketGroup(
+      horizontal,
+      ([along, inward]) => [along, depth - inward],
+      ({ start, end, reach }) => [start, depth - reach, end - start, reach],
+    ),
+    hiddenPanelPocketGroup(
+      vertical,
+      ([along, inward]) => [inward, along],
+      ({ start, end, reach }) => [0, start, reach, end - start],
+    ),
+    hiddenPanelPocketGroup(
+      vertical,
+      ([along, inward]) => [width - inward, along],
+      ({ start, end, reach }) => [width - reach, start, reach, end - start],
+    ),
+  ];
 }
 
 function entityBounds(entities) {
@@ -928,7 +1070,12 @@ export function buildLayout(values) {
   const fingerWalls = spec.wall_connection === "finger" || hiddenFingerWalls;
   const miteredWalls = spec.wall_connection === "miter";
   const hiddenPocketDepth = wall - spec.hidden_finger_skin;
-  const hiddenTabDepth = hiddenPocketDepth - spec.joint_clearance;
+  const hiddenBottomPocketDepth = hiddenFingerBottom
+    ? spec.bottom_thickness - spec.hidden_finger_skin
+    : 0;
+  const hiddenTopPocketDepth = hiddenFingerTop
+    ? spec.top_thickness - spec.hidden_finger_skin
+    : 0;
   const bottomClearance = capturedBottom ? spec.bottom_slot_extra : 0;
   const bottomSlotHeight = capturedBottom ? spec.bottom_thickness + bottomClearance : 0;
   const bottomSlotY = capturedBottom ? spec.bottom_slot_offset : 0;
@@ -956,10 +1103,12 @@ export function buildLayout(values) {
   const margin = 20;
   const wallBaseZ = spec.bottom_type === "butt_bottom"
     ? spec.bottom_thickness
-    : insetBottom ? spec.bottom_thickness - spec.bottom_inset_depth : 0;
+    : insetBottom ? spec.bottom_thickness - spec.bottom_inset_depth
+      : hiddenFingerBottom ? spec.hidden_finger_skin : 0;
   const wallTopZ = spec.top_type === "butt_top"
     ? spec.height - spec.top_thickness
-    : insetTop ? spec.height - (spec.top_thickness - spec.top_inset_depth) : spec.height;
+    : insetTop ? spec.height - (spec.top_thickness - spec.top_inset_depth)
+      : hiddenFingerTop ? spec.height - spec.hidden_finger_skin : spec.height;
   const wallHeight = wallTopZ - wallBaseZ;
   const assembledHeight = spec.height;
 
@@ -974,11 +1123,15 @@ export function buildLayout(values) {
     jointClearance: spec.joint_clearance,
     useDogbones: spec.use_dogbones,
     bottomMode: fingerJointedBottom ? "slot" : "plain",
-    bottomJointDepth: spec.bottom_thickness,
+    bottomJointDepth: hiddenFingerBottom
+      ? spec.bottom_thickness - spec.hidden_finger_skin
+      : spec.bottom_thickness,
     bottomPhase: hasFingerBottom ? 1 : 0,
     hiddenBottomPockets: hiddenFingerBottom,
     topMode: fingerJointedTop ? "slot" : "plain",
-    topJointDepth: spec.top_thickness,
+    topJointDepth: hiddenFingerTop
+      ? spec.top_thickness - spec.hidden_finger_skin
+      : spec.top_thickness,
     topPhase: hasFingerTop ? 1 : 0,
     hiddenTopPockets: hiddenFingerTop,
     hiddenPocketDepth,
@@ -1130,12 +1283,12 @@ export function buildLayout(values) {
       assemblyOrigin: [wall, wall, 0],
     },
     hidden_finger_jointed: {
-      coreWidth: spec.width - 2 * wall,
-      coreDepth: spec.depth - 2 * wall,
-      edgeMode: "tab",
-      jointDepth: hiddenTabDepth,
+      coreWidth: spec.width,
+      coreDepth: spec.depth,
+      edgeMode: "plain",
+      jointDepth: 0,
       label: "HIDDEN-FINGER BOTTOM",
-      assemblyOrigin: [wall, wall, 0],
+      assemblyOrigin: [0, 0, 0],
     },
   };
   let bottom = null;
@@ -1158,6 +1311,15 @@ export function buildLayout(values) {
       edgePhase: bottomConfig.edgeMode === "tab" ? 1 : 0,
       insetPockets: insetBottom ? insetPockets : [],
       insetPocketDepth: insetBottom ? spec.bottom_inset_depth : 0,
+      hiddenPocketGroups: hiddenFingerBottom ? hiddenPanelPocketGroups({
+        width: spec.width,
+        depth: spec.depth,
+        wall,
+        skin: spec.hidden_finger_skin,
+        clearance: spec.joint_clearance,
+        fingerSize: spec.finger_size,
+      }) : [],
+      hiddenPocketDepth: hiddenBottomPocketDepth,
       assembly: {
         origin: bottomConfig.assemblyOrigin,
         u_axis: [1, 0, 0],
@@ -1212,12 +1374,12 @@ export function buildLayout(values) {
       assemblyOrigin: [wall, wall, spec.height],
     },
     hidden_finger_jointed: {
-      coreWidth: spec.width - 2 * wall,
-      coreDepth: spec.depth - 2 * wall,
-      edgeMode: "tab",
-      jointDepth: hiddenTabDepth,
+      coreWidth: spec.width,
+      coreDepth: spec.depth,
+      edgeMode: "plain",
+      jointDepth: 0,
       label: "HIDDEN-FINGER TOP",
-      assemblyOrigin: [wall, wall, spec.height],
+      assemblyOrigin: [0, 0, spec.height],
     },
   };
   let top = null;
@@ -1242,6 +1404,16 @@ export function buildLayout(values) {
       insetPockets: insetTop ? insetPockets : [],
       insetPocketDepth: insetTop ? spec.top_inset_depth : 0,
       insetPocketLayer: "POCKET_TOP_INSET",
+      hiddenPocketGroups: hiddenFingerTop ? hiddenPanelPocketGroups({
+        width: spec.width,
+        depth: spec.depth,
+        wall,
+        skin: spec.hidden_finger_skin,
+        clearance: spec.joint_clearance,
+        fingerSize: spec.finger_size,
+      }) : [],
+      hiddenPocketDepth: hiddenTopPocketDepth,
+      hiddenPocketLayer: "POCKET_HIDDEN_TOP",
       assembly: {
         origin: topConfig.assemblyOrigin,
         u_axis: [1, 0, 0],
@@ -1281,6 +1453,8 @@ export function buildLayout(values) {
       hidden_finger_pocket_depth: (hiddenFingerWalls || hiddenFingerBottom || hiddenFingerTop)
         ? roundTo(hiddenPocketDepth, 3)
         : 0,
+      hidden_bottom_pocket_depth: roundTo(hiddenBottomPocketDepth, 3),
+      hidden_top_pocket_depth: roundTo(hiddenTopPocketDepth, 3),
       pocket_depth: bottomPocketDepth,
       bottom_pocket_depth: bottomPocketDepth,
       top_pocket_depth: topPocketDepth,

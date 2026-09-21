@@ -375,7 +375,11 @@ async function updateGeometry(successMessage = "Geometry ready") {
     dimensionCard.textContent = `${displayedBasis} · ${measure(dimensions.width).replace(` ${displayUnit}`, "")} × ${measure(dimensions.depth).replace(` ${displayUnit}`, "")} × ${measure(dimensions.height)}`;
     const pocketDepths = [
       result.manufacturing.hidden_finger_pocket_depth > 0
-        ? ["Hidden", result.manufacturing.hidden_finger_pocket_depth] : null,
+        ? ["Wall hidden", result.manufacturing.hidden_finger_pocket_depth] : null,
+      result.manufacturing.hidden_bottom_pocket_depth > 0
+        ? ["Bottom hidden", result.manufacturing.hidden_bottom_pocket_depth] : null,
+      result.manufacturing.hidden_top_pocket_depth > 0
+        ? ["Top hidden", result.manufacturing.hidden_top_pocket_depth] : null,
       result.manufacturing.has_bottom_pocket
         ? ["Bottom", result.manufacturing.bottom_pocket_depth] : null,
       result.manufacturing.has_top_pocket
@@ -1458,6 +1462,8 @@ function drawDrawing() {
     POCKET_TOP_SLOT: { color: "#72d8d3", width: 1, dash: [5, 3] },
     POCKET_TOP_INSET: { color: "#72d8d3", width: 1, dash: [5, 3] },
     POCKET_HIDDEN_FINGERS: { color: "#72d8d3", width: 1, dash: [5, 3] },
+    POCKET_HIDDEN_BOTTOM: { color: "#72d8d3", width: 1, dash: [5, 3] },
+    POCKET_HIDDEN_TOP: { color: "#72d8d3", width: 1, dash: [5, 3] },
     MITER_END: { color: "#f1b65c", width: 1, dash: [6, 3] },
     ANNOTATION: { color: "#748073", width: 1, dash: [] },
   };

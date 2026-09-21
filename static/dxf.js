@@ -46,12 +46,18 @@ export function layoutToDxf(layout, units = "mm") {
   const topInsetPocketLayer = `POCKET_TOP_INSET_${topPocketDepth.toFixed(3)}${units.toUpperCase()}`;
   const hiddenPocketDepth = layout.manufacturing.hidden_finger_pocket_depth * scale;
   const hiddenPocketLayer = `POCKET_HIDDEN_FINGERS_${hiddenPocketDepth.toFixed(3)}${units.toUpperCase()}`;
+  const hiddenBottomPocketDepth = layout.manufacturing.hidden_bottom_pocket_depth * scale;
+  const hiddenBottomPocketLayer = `POCKET_HIDDEN_BOTTOM_${hiddenBottomPocketDepth.toFixed(3)}${units.toUpperCase()}`;
+  const hiddenTopPocketDepth = layout.manufacturing.hidden_top_pocket_depth * scale;
+  const hiddenTopPocketLayer = `POCKET_HIDDEN_TOP_${hiddenTopPocketDepth.toFixed(3)}${units.toUpperCase()}`;
   const outputLayer = (layer) => ({
     POCKET_BOTTOM_SLOT: bottomPocketLayer,
     POCKET_BOTTOM_INSET: bottomInsetPocketLayer,
     POCKET_TOP_SLOT: topPocketLayer,
     POCKET_TOP_INSET: topInsetPocketLayer,
     POCKET_HIDDEN_FINGERS: hiddenPocketLayer,
+    POCKET_HIDDEN_BOTTOM: hiddenBottomPocketLayer,
+    POCKET_HIDDEN_TOP: hiddenTopPocketLayer,
   })[layer] ?? layer;
 
   const storedSpec = { ...layout.spec };
@@ -77,7 +83,7 @@ export function layoutToDxf(layout, units = "mm") {
     pair(0, "LTYPE"), pair(100, "AcDbSymbolTableRecord"), pair(100, "AcDbLinetypeTableRecord"),
     pair(2, "DASHED"), pair(70, 0), pair(3, "Dashed __ __"), pair(72, 65), pair(73, 2),
     pair(40, 9 * scale), pair(49, 6 * scale), pair(74, 0), pair(49, -3 * scale), pair(74, 0),
-    pair(0, "ENDTAB"), pair(0, "TABLE"), pair(2, "LAYER"), pair(70, 8),
+    pair(0, "ENDTAB"), pair(0, "TABLE"), pair(2, "LAYER"), pair(70, 10),
   ];
   for (const [name, color, lineType] of [
     ["CUT_OUTSIDE", 7, "CONTINUOUS"],
@@ -86,6 +92,8 @@ export function layoutToDxf(layout, units = "mm") {
     [topPocketLayer, 5, "CONTINUOUS"],
     [topInsetPocketLayer, 5, "CONTINUOUS"],
     [hiddenPocketLayer, 4, "CONTINUOUS"],
+    [hiddenBottomPocketLayer, 4, "CONTINUOUS"],
+    [hiddenTopPocketLayer, 4, "CONTINUOUS"],
     ["MITER_END", 3, "DASHED"],
     ["ANNOTATION", 8, "CONTINUOUS"],
   ]) {
