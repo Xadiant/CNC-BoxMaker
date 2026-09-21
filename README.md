@@ -2,6 +2,13 @@
 
 A small, dependency-free browser app that generates a CNC-ready DXF layout for an open-top drawer with finger-jointed walls and a captured bottom. Geometry, previews, validation, DXF generation, and DXF settings import all run locally in the browser. Python only serves the static web files.
 
+## Live interface
+
+<https://xadiant.github.io/CNC-BoxMaker/>
+
+The interface is deployed from `static/` to GitHub Pages whenever `main` is
+updated. It runs entirely in the browser; no installation or server is needed.
+
 ## Run
 
 ```powershell
