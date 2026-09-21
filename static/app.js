@@ -29,6 +29,7 @@ const unitButtons = [...document.querySelectorAll("[data-unit]")];
 const explodeSlider = document.querySelector("#explodeSlider");
 const explodeValue = document.querySelector("#explodeValue");
 const modelMode = document.querySelector("#modelMode");
+const renderStyle = document.querySelector("#renderStyle");
 const diagnosticStatus = document.querySelector("#diagnosticStatus");
 const modelTitle = document.querySelector("#modelTitle");
 const modelLegend = document.querySelector("#modelLegend");
@@ -817,7 +818,13 @@ function buildEmptySpaceGeometry(parts, boxSpec, spread) {
     ];
     for (const candidate of candidates) {
       if (!emptyCells.has(key(...candidate.neighbor))) {
-        faces.push({ color: "#52cfeb", isBottom: false, surface: candidate.surface, points: candidate.points });
+        faces.push({
+          color: "#52cfeb",
+          alpha: 0.28,
+          isBottom: false,
+          surface: candidate.surface,
+          points: candidate.points,
+        });
       }
     }
   }
@@ -829,7 +836,9 @@ function buildEmptySpaceGeometry(parts, boxSpec, spread) {
       const end = face.points[(index + 1) % face.points.length];
       const pointKey = (point) => point.map((value) => value.toFixed(8)).join(",");
       const edgeKey = [pointKey(start), pointKey(end)].sort().join("|");
-      if (!lineMap.has(edgeKey)) lineMap.set(edgeKey, { color: "#176070", points: [start, end] });
+      if (!lineMap.has(edgeKey)) {
+        lineMap.set(edgeKey, { color: "#176070", alpha: 0.62, points: [start, end] });
+      }
     }
   }
 
@@ -905,6 +914,11 @@ function drawModel() {
     [part.assembly.u_axis, part.assembly.v_axis, part.assembly.thickness_axis]
       .flatMap((basis) => rotatePoint(basis)),
   );
+  const partDirectionMatrix = (part) => new Float32Array([
+    ...part.assembly.u_axis,
+    ...part.assembly.v_axis,
+    ...part.assembly.thickness_axis,
+  ]);
 
   const faces = [];
   const modelLines = [];
@@ -943,6 +957,7 @@ function drawModel() {
     diagnosticMode ? .14 : 1,
     partMatrix,
     partNormalMatrix,
+    partDirectionMatrix,
     visibleFaces,
     modelLines,
     cw,
@@ -1018,6 +1033,38 @@ function compileShader(gl, type, source) {
   return shader;
 }
 
+function loadMaterialTexture(gl, url, fallbackColor, wrapMode = gl.REPEAT) {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    1,
+    1,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    new Uint8Array([...fallbackColor, 255]),
+  );
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapMode);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapMode);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+  const image = new Image();
+  image.addEventListener("load", () => {
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    drawModel();
+  });
+  image.addEventListener("error", () => console.warn(`Could not load material texture: ${url}`));
+  image.src = url;
+  return texture;
+}
+
 function createModelRenderer(canvas) {
   const gl = canvas.getContext("webgl", { alpha: true, antialias: true, depth: true });
   if (!gl) throw new Error("This browser does not support WebGL");
@@ -1027,27 +1074,63 @@ function createModelRenderer(canvas) {
     attribute vec3 a_normal;
     uniform mat4 u_matrix;
     uniform mat3 u_normal_matrix;
+    uniform mat3 u_direction_matrix;
     uniform float u_alpha;
     uniform float u_depth_bias;
     varying vec4 v_color;
     varying vec3 v_normal;
+    varying vec3 v_direction_normal;
+    varying vec3 v_local_position;
+    varying float v_edge;
     void main() {
       gl_Position = u_matrix * vec4(a_position, 1.0);
       gl_Position.z += u_depth_bias;
       v_color = vec4(a_color.rgb, a_color.a * u_alpha);
       v_normal = normalize(u_normal_matrix * a_normal);
+      v_direction_normal = normalize(u_direction_matrix * a_normal);
+      v_local_position = a_position;
+      v_edge = 1.0 - abs(a_normal.z);
     }
   `);
   const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, `
     precision mediump float;
     varying vec4 v_color;
     varying vec3 v_normal;
+    varying vec3 v_direction_normal;
+    varying vec3 v_local_position;
+    varying float v_edge;
     uniform float u_lighting;
+    uniform float u_directional_shading;
+    uniform float u_material;
+    uniform sampler2D u_face_texture;
+    uniform sampler2D u_edge_texture;
+
     void main() {
       vec3 lightDirection = normalize(vec3(-0.45, -0.65, 0.75));
       float diffuse = max(dot(normalize(v_normal), lightDirection), 0.0);
       float brightness = mix(1.0, 0.48 + 0.52 * diffuse, u_lighting);
-      gl_FragColor = vec4(v_color.rgb * brightness, v_color.a);
+      vec3 directionNormal = normalize(v_direction_normal);
+      vec3 directionShades = mix(
+        vec3(0.76, 0.84, 0.92),
+        vec3(0.88, 0.96, 1.04),
+        step(vec3(0.0), directionNormal)
+      );
+      float directionalShade = dot(abs(directionNormal), directionShades)
+        / max(dot(abs(directionNormal), vec3(1.0)), 0.001);
+      brightness = mix(brightness, directionalShade, u_directional_shading);
+      float edge = smoothstep(0.05, 0.40, v_edge);
+      vec3 materialColor = v_color.rgb;
+      if (u_material > 0.5) {
+        vec2 faceUv = v_local_position.xy / 500.0;
+        vec2 edgeUv = vec2(
+          (v_local_position.x + v_local_position.y) / 180.0,
+          v_local_position.z / 12.0
+        );
+        vec3 faceColor = texture2D(u_face_texture, faceUv).rgb;
+        vec3 edgeColor = texture2D(u_edge_texture, edgeUv).rgb;
+        materialColor = mix(faceColor, edgeColor, edge);
+      }
+      gl_FragColor = vec4(materialColor * brightness, v_color.a);
     }
   `);
   const program = gl.createProgram();
@@ -1057,6 +1140,16 @@ function createModelRenderer(canvas) {
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     throw new Error(gl.getProgramInfoLog(program) || "Could not link 3D shader");
   }
+  const textureSets = {
+    wood: {
+      face: loadMaterialTexture(gl, "./assets/wood-face.jpg", [190, 142, 87]),
+      edge: loadMaterialTexture(gl, "./assets/wood-endgrain.jpg", [172, 112, 61], gl.MIRRORED_REPEAT),
+    },
+    plywood: {
+      face: loadMaterialTexture(gl, "./assets/plywood-face.jpg", [161, 116, 75]),
+      edge: loadMaterialTexture(gl, "./assets/plywood-edge.jpg", [154, 103, 59], gl.MIRRORED_REPEAT),
+    },
+  };
   return {
     gl,
     program,
@@ -1066,9 +1159,15 @@ function createModelRenderer(canvas) {
     normal: gl.getAttribLocation(program, "a_normal"),
     matrix: gl.getUniformLocation(program, "u_matrix"),
     normalMatrix: gl.getUniformLocation(program, "u_normal_matrix"),
+    directionMatrix: gl.getUniformLocation(program, "u_direction_matrix"),
     alpha: gl.getUniformLocation(program, "u_alpha"),
     depthBias: gl.getUniformLocation(program, "u_depth_bias"),
     lighting: gl.getUniformLocation(program, "u_lighting"),
+    directionalShading: gl.getUniformLocation(program, "u_directional_shading"),
+    material: gl.getUniformLocation(program, "u_material"),
+    faceTexture: gl.getUniformLocation(program, "u_face_texture"),
+    edgeTexture: gl.getUniformLocation(program, "u_edge_texture"),
+    textureSets,
   };
 }
 
@@ -1079,11 +1178,29 @@ function rgbChannels(hex, adjustment = 0) {
   );
 }
 
-function renderSolidModel(parts, partAlpha, partMatrix, partNormalMatrix, faces, modelLines, width, height, maxDimension, ratio) {
+function renderSolidModel(
+  parts,
+  partAlpha,
+  partMatrix,
+  partNormalMatrix,
+  partDirectionMatrix,
+  faces,
+  modelLines,
+  width,
+  height,
+  maxDimension,
+  ratio,
+) {
   if (!modelRenderer) modelRenderer = createModelRenderer(modelCanvas);
   const {
-    gl, program, buffer, position, color, normal, matrix, normalMatrix, alpha, depthBias, lighting,
+    gl, program, buffer, position, color, normal, matrix, normalMatrix, directionMatrix, alpha, depthBias,
+    lighting, directionalShading, material, faceTexture, edgeTexture, textureSets,
   } = modelRenderer;
+  const selectedRenderStyle = renderStyle.value;
+  const selectedTextures = textureSets[selectedRenderStyle] ?? textureSets.wood;
+  const texturedMaterial = ["wood", "plywood"].includes(selectedRenderStyle) ? 1 : 0;
+  const partLighting = selectedRenderStyle === "shaded" ? 0 : 1;
+  const partDirectionalShading = selectedRenderStyle === "shaded" ? 1 : 0;
   const depthRange = maxDimension * 4;
   const toClip = (point, depthBias = 0) => [
     point.x / width * 2 - 1,
@@ -1133,6 +1250,12 @@ function renderSolidModel(parts, partAlpha, partMatrix, partNormalMatrix, faces,
   gl.vertexAttribPointer(normal, 3, gl.FLOAT, false, 40, 28);
   gl.uniform1f(alpha, 1);
   gl.uniform1f(depthBias, 0);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, selectedTextures.face);
+  gl.uniform1i(faceTexture, 0);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, selectedTextures.edge);
+  gl.uniform1i(edgeTexture, 1);
 
   const bindBuffer = (vertexBuffer) => {
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
@@ -1144,15 +1267,20 @@ function renderSolidModel(parts, partAlpha, partMatrix, partNormalMatrix, faces,
     for (const part of parts) {
       gl.uniformMatrix4fv(matrix, false, partMatrix(part));
       gl.uniformMatrix3fv(normalMatrix, false, partNormalMatrix(part));
+      gl.uniformMatrix3fv(directionMatrix, false, partDirectionMatrix(part));
       gl.uniform1f(alpha, partAlpha);
       gl.uniform1f(depthBias, 0);
-      gl.uniform1f(lighting, 1);
+      gl.uniform1f(lighting, partLighting);
+      gl.uniform1f(directionalShading, partDirectionalShading);
+      gl.uniform1f(material, texturedMaterial);
       bindBuffer(part.renderMesh.fillBuffer);
       gl.drawArrays(gl.TRIANGLES, 0, part.renderMesh.fillCount);
       if (part.renderMesh.lineCount) {
         gl.uniform1f(alpha, partAlpha < 1 ? .2 : 1);
         gl.uniform1f(depthBias, -0.0004);
         gl.uniform1f(lighting, 0);
+        gl.uniform1f(directionalShading, 0);
+        gl.uniform1f(material, 0);
         bindBuffer(part.renderMesh.lineBuffer);
         gl.lineWidth(Math.max(1, ratio));
         gl.drawArrays(gl.LINES, 0, part.renderMesh.lineCount);
@@ -1184,12 +1312,15 @@ function renderSolidModel(parts, partAlpha, partMatrix, partNormalMatrix, faces,
   ]);
   gl.uniformMatrix4fv(matrix, false, identityMatrix);
   gl.uniformMatrix3fv(normalMatrix, false, identityNormalMatrix);
+  gl.uniformMatrix3fv(directionMatrix, false, identityNormalMatrix);
   gl.uniform1f(alpha, 1);
   gl.uniform1f(depthBias, 0);
   gl.disable(gl.DEPTH_TEST);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   bindBuffer(buffer);
+  gl.uniform1f(material, 0);
+  gl.uniform1f(directionalShading, 0);
   gl.uniform1f(lighting, 1);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(transparentVertices), gl.DYNAMIC_DRAW);
   gl.drawArrays(gl.TRIANGLES, 0, transparentVertices.length / 10);
@@ -1320,30 +1451,84 @@ function drawDrawing() {
   zoomReadout.textContent = Math.abs(percent - 100) < 2 ? "FIT" : `${percent}%`;
 }
 
-function zoomDrawing(factor, x, y) {
+function zoomDrawing(factor, fromX, fromY, toX = fromX, toY = fromY) {
   const oldScale = drawingView.scale;
   const newScale = Math.max(drawingView.fittedScale * .25, Math.min(drawingView.fittedScale * 12, oldScale * factor));
-  drawingView.panX = x - (x - drawingView.panX) * newScale / oldScale;
-  drawingView.panY = y - (y - drawingView.panY) * newScale / oldScale;
+  const appliedFactor = newScale / oldScale;
+  drawingView.panX = toX - (fromX - drawingView.panX) * appliedFactor;
+  drawingView.panY = toY - (fromY - drawingView.panY) * appliedFactor;
   drawingView.scale = newScale;
   drawDrawing();
 }
 
-function bindDrag(stage, onDrag) {
-  let active = false, x = 0, y = 0, dragMode = "primary";
+function zoomModel(factor, fromX, fromY, toX = fromX, toY = fromY) {
+  const rect = modelStage.getBoundingClientRect();
+  const oldZoom = modelView.zoom;
+  const newZoom = Math.max(.3, Math.min(10, oldZoom * factor));
+  const appliedFactor = newZoom / oldZoom;
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  modelView.panX = toX - centerX - (fromX - centerX - modelView.panX) * appliedFactor;
+  modelView.panY = toY - centerY - (fromY - centerY - modelView.panY) * appliedFactor;
+  modelView.zoom = newZoom;
+  drawModel();
+}
+
+function bindPointerControls(stage, { onDrag, onPinch }) {
+  const pointers = new Map();
+  let dragMode = "primary";
+  let gesture = null;
+
+  const gestureMetrics = () => {
+    const [first, second] = [...pointers.values()];
+    return {
+      x: (first.x + second.x) / 2,
+      y: (first.y + second.y) / 2,
+      distance: Math.hypot(second.x - first.x, second.y - first.y),
+    };
+  };
+
   stage.addEventListener("pointerdown", (event) => {
-    active = true; x = event.clientX; y = event.clientY;
-    dragMode = event.shiftKey || event.button === 2 ? "secondary" : "primary";
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size === 1) {
+      dragMode = event.shiftKey || event.button === 2 ? "secondary" : "primary";
+    } else if (pointers.size === 2) {
+      gesture = gestureMetrics();
+    }
     stage.setPointerCapture(event.pointerId);
   });
+
   stage.addEventListener("pointermove", (event) => {
-    if (!active) return;
-    const dx = event.clientX - x, dy = event.clientY - y;
-    x = event.clientX; y = event.clientY;
-    onDrag(dx, dy, event, dragMode);
+    const previous = pointers.get(event.pointerId);
+    if (!previous) return;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (pointers.size >= 2) {
+      const nextGesture = gestureMetrics();
+      if (gesture && gesture.distance > 0 && nextGesture.distance > 0) {
+        const rect = stage.getBoundingClientRect();
+        onPinch({
+          factor: nextGesture.distance / gesture.distance,
+          fromX: gesture.x - rect.left,
+          fromY: gesture.y - rect.top,
+          toX: nextGesture.x - rect.left,
+          toY: nextGesture.y - rect.top,
+        });
+      }
+      gesture = nextGesture;
+      return;
+    }
+
+    onDrag(event.clientX - previous.x, event.clientY - previous.y, event, dragMode);
   });
-  stage.addEventListener("pointerup", () => { active = false; });
-  stage.addEventListener("pointercancel", () => { active = false; });
+
+  const endPointer = (event) => {
+    pointers.delete(event.pointerId);
+    gesture = pointers.size >= 2 ? gestureMetrics() : null;
+  };
+  stage.addEventListener("pointerup", endPointer);
+  stage.addEventListener("pointercancel", endPointer);
+  stage.addEventListener("lostpointercapture", endPointer);
 }
 
 function wrapAngle(angle) {
@@ -1351,20 +1536,31 @@ function wrapAngle(angle) {
   return ((angle + Math.PI) % fullTurn + fullTurn) % fullTurn - Math.PI;
 }
 
-bindDrag(modelStage, (dx, dy, event, dragMode) => {
-  if (dragMode === "secondary") {
-    modelView.panX += dx; modelView.panY += dy;
-  } else {
-    modelView.yaw = wrapAngle(modelView.yaw - dx * .008);
-    modelView.pitch = wrapAngle(modelView.pitch - dy * .008);
-  }
-  drawModel();
+bindPointerControls(modelStage, {
+  onDrag: (dx, dy, event, dragMode) => {
+    if (dragMode === "secondary") {
+      modelView.panX += dx; modelView.panY += dy;
+    } else {
+      modelView.yaw = wrapAngle(modelView.yaw - dx * .008);
+      modelView.pitch = wrapAngle(modelView.pitch - dy * .008);
+    }
+    drawModel();
+  },
+  onPinch: ({ factor, fromX, fromY, toX, toY }) => {
+    zoomModel(factor, fromX, fromY, toX, toY);
+  },
 });
 
-bindDrag(drawingStage, (dx, dy) => {
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
-  drawingView.panX += dx * ratio; drawingView.panY += dy * ratio;
-  drawDrawing();
+bindPointerControls(drawingStage, {
+  onDrag: (dx, dy) => {
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    drawingView.panX += dx * ratio; drawingView.panY += dy * ratio;
+    drawDrawing();
+  },
+  onPinch: ({ factor, fromX, fromY, toX, toY }) => {
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    zoomDrawing(factor, fromX * ratio, fromY * ratio, toX * ratio, toY * ratio);
+  },
 });
 
 modelStage.addEventListener("wheel", (event) => {
@@ -1409,6 +1605,7 @@ modelMode.addEventListener("change", () => {
   modelLegend.classList.toggle("empty-mode", drawMode === "empty");
   drawModel();
 });
+renderStyle.addEventListener("change", drawModel);
 document.querySelector("#fitDrawing").addEventListener("click", fitDrawing);
 document.querySelector("#zoomIn").addEventListener("click", () => zoomDrawing(1.22, drawingCanvas.width/2, drawingCanvas.height/2));
 document.querySelector("#zoomOut").addEventListener("click", () => zoomDrawing(1/1.22, drawingCanvas.width/2, drawingCanvas.height/2));

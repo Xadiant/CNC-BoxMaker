@@ -172,6 +172,15 @@
                 <option value="empty">Empty space</option>
               </select>
             </label>
+            <label class="draw-mode" for="renderStyle">
+              <span>Render</span>
+              <select id="renderStyle">
+                <option value="lighting" selected>Lighting</option>
+                <option value="shaded">Shaded</option>
+                <option value="wood">Wood</option>
+                <option value="plywood">Plywood</option>
+              </select>
+            </label>
             <button id="reset3d" type="button" title="Reset 3D view">Reset view</button>
           </div>
         </div>
@@ -183,7 +192,8 @@
             <input id="explodeSlider" type="range" min="0" max="100" value="0" step="1" />
           </div>
           <div class="diagnostic-status" id="diagnosticStatus" hidden></div>
-          <div class="interaction-hint"><span>Drag</span> orbit <span>Right / Shift + drag</span> pan <span>Scroll</span> zoom</div>
+          <div class="interaction-hint desktop-hint"><span>Drag</span> orbit <span>Right / Shift + drag</span> pan <span>Scroll</span> zoom</div>
+          <div class="interaction-hint touch-hint"><span>1 finger</span> orbit <span>2 fingers</span> pan / zoom</div>
           <div class="dimension-card" id="dimensionCard">Interior dimensions</div>
         </div>
         <div class="viewer-footer" id="modelLegend">
@@ -207,7 +217,8 @@
             <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
             <button id="fitDrawing" type="button" aria-label="Fit drawing">⌗</button>
           </div>
-          <div class="interaction-hint"><span>Drag</span> pan <span>Scroll</span> zoom</div>
+          <div class="interaction-hint desktop-hint"><span>Drag</span> pan <span>Scroll</span> zoom</div>
+          <div class="interaction-hint touch-hint"><span>1 finger</span> pan <span>2 fingers</span> pan / zoom</div>
         </div>
         <div class="viewer-footer layer-legend">
           <div><span class="line-swatch cut"></span>Cut</div>

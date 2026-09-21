@@ -118,13 +118,14 @@ legend { width: 100%; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 1p
 .viewport-panel, .drawing-panel { display: grid; grid-template-rows: 72px minmax(0, 1fr) 45px; }
 .viewer-header { display: flex; align-items: center; justify-content: space-between; padding: 0 19px; border-bottom: 1px solid var(--border); }
 .viewer-header .eyebrow { margin-bottom: 4px; }
-.view-actions { display: flex; align-items: center; gap: 10px; }
+.view-actions { display: flex; align-items: center; gap: 8px; }
 .view-actions button { border: 1px solid var(--border); border-radius: 4px; padding: 6px 9px; color: var(--muted); background: transparent; font-size: 10px; cursor: pointer; }
 .view-actions button:hover { color: var(--text); border-color: #465046; }
 .draw-mode { display: flex; align-items: center; gap: 6px; color: #6f796e; font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .draw-mode select { height: 27px; padding: 0 25px 0 8px; border: 1px solid var(--border); border-radius: 4px; outline: 0; color: #b5bdb3; background: #0c100d; font-size: 9px; font-weight: 600; letter-spacing: 0; text-transform: none; cursor: pointer; }
 .draw-mode select:hover { border-color: #465046; color: var(--text); }
 .draw-mode select:focus-visible { border-color: var(--accent-dim); box-shadow: 0 0 0 2px rgba(201, 242, 71, .1); }
+#renderStyle { min-width: 76px; }
 .zoom-readout { padding: 5px 7px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font: 9px ui-monospace, monospace; }
 
 .canvas-stage { position: relative; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; background-color: #0e130f; background-image: radial-gradient(#252d25 0.7px, transparent 0.7px); background-size: 18px 18px; }
@@ -133,6 +134,7 @@ legend { width: 100%; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 1p
 .drawing-stage { background-color: #0c100d; background-image: linear-gradient(rgba(59, 72, 59, .12) 1px, transparent 1px), linear-gradient(90deg, rgba(59, 72, 59, .12) 1px, transparent 1px); background-size: 22px 22px; }
 .interaction-hint { position: absolute; left: 50%; bottom: 13px; transform: translateX(-50%); white-space: nowrap; color: #6f796e; font-size: 9px; pointer-events: none; }
 .interaction-hint span { color: #aab2a8; }
+.touch-hint { display: none; }
 .dimension-card { position: absolute; right: 14px; top: 14px; padding: 7px 9px; border: 1px solid rgba(201,242,71,.23); border-radius: 4px; color: var(--accent); background: rgba(13,18,14,.82); font: 9px ui-monospace, monospace; }
 .axis-key { position: absolute; left: 15px; top: 15px; color: #657064; font: 9px ui-monospace, monospace; }
 .axis-key i { width: 11px; height: 2px; display: inline-block; margin: 0 3px 2px 7px; }
@@ -159,6 +161,11 @@ legend { width: 100%; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 1p
 .drawing-tools { position: absolute; right: 13px; top: 13px; display: grid; gap: 4px; }
 .drawing-tools button { width: 28px; height: 28px; border: 1px solid #303930; border-radius: 4px; color: #9da69a; background: rgba(13,18,14,.9); cursor: pointer; }
 .drawing-tools button:hover { color: var(--accent); border-color: var(--accent-dim); }
+
+@media (pointer: coarse), (max-width: 700px) {
+  .desktop-hint { display: none; }
+  .touch-hint { display: block; }
+}
 
 @media (max-width: 1050px) {
   body { overflow: auto; }
