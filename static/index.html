@@ -22,7 +22,6 @@
 
         <form id="boxForm" autocomplete="off">
           <fieldset class="dimension-basis-fieldset">
-            <legend>Dimension reference</legend>
             <label class="select-row" for="dimension_basis">
               <span>Dimensions describe</span>
               <select id="dimension_basis" name="dimension_basis">
@@ -33,9 +32,8 @@
           </fieldset>
 
           <fieldset class="wall-connection-fieldset">
-            <legend>Wall connection</legend>
             <label class="select-row" for="wall_connection">
-              <span>Corner joint</span>
+              <span>Wall joint</span>
               <select id="wall_connection" name="wall_connection">
                 <option value="finger" selected>Finger joints</option>
                 <option value="hidden_finger">Hidden fingers</option>
@@ -44,13 +42,11 @@
                 <option value="butt_sides">Butted · side/side</option>
               </select>
             </label>
-            <p id="wallConnectionHelp" class="control-help">Interlocking finger joints at all four vertical corners.</p>
           </fieldset>
 
           <fieldset class="bottom-type-fieldset">
-            <legend>Bottom type</legend>
             <label class="select-row" for="bottom_type">
-              <span>Construction</span>
+              <span>Bottom type</span>
               <select id="bottom_type" name="bottom_type">
                 <option value="none">None</option>
                 <option value="captured" selected>Captured</option>
@@ -60,7 +56,6 @@
                 <option value="hidden_finger_jointed">Hidden fingers</option>
               </select>
             </label>
-            <p id="bottomTypeHelp" class="control-help">Rides in grooves routed into all four walls.</p>
           </fieldset>
 
           <label class="dogbone-toggle" id="dogboneToggle" for="use_dogbones">
@@ -140,13 +135,8 @@
 
         <div id="errorMessage" class="error-message" role="alert" hidden></div>
 
-        <button id="downloadButton" class="download-button" type="button">
-          <span>Download DXF</span>
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v10m0 0 4-4m-4 4L6 8M3 15v2h14v-2"/></svg>
-        </button>
         <button id="importSettingsButton" class="import-button" type="button">Load settings from DXF</button>
         <input id="dxfSettingsFile" type="file" accept=".dxf,application/dxf" hidden />
-        <p class="fine-print">Exports include these settings for later reload. Finger clearance is added around each socket and between hidden fingers and the neighboring exterior skin. Hidden skin is the material left on the exterior face of a blind finger pocket. Captured-bottom slot offset is measured from the panel bottom to the lower edge of the groove.</p>
 
         <fieldset class="piece-drawing">
           <legend>Pieces to draw <span id="pieceDrawingCount">5 of 5</span></legend>
@@ -224,6 +214,10 @@
           <div><span class="line-swatch cut"></span>Cut</div>
           <div><span class="line-swatch pocket"></span>Pocket</div>
           <div><span class="line-swatch miter"></span>Miter end</div>
+          <button id="downloadButton" class="download-button" type="button">
+            <span>Download DXF</span>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v10m0 0 4-4m-4 4L6 8M3 15v2h14v-2"/></svg>
+          </button>
         </div>
       </section>
     </main>

@@ -42,27 +42,12 @@ const bottomTypeLabels = {
   finger_jointed: "Finger-jointed bottom",
   hidden_finger_jointed: "Hidden-finger bottom",
 };
-const bottomTypeHelp = {
-  none: "Creates the four walls without a bottom piece.",
-  captured: "Rides in grooves routed into all four walls.",
-  butt_bottom: "Covers the outside footprint below shortened walls while preserving the requested overall height.",
-  butt_inside: "Fits between the four walls at the bottom of the box.",
-  finger_jointed: "Interlocks with finger joints along the bottoms of all four walls.",
-  hidden_finger_jointed: "Interlocks with blind pockets in the walls, leaving the exterior faces uncut.",
-};
 const wallConnectionLabels = {
   finger: "Finger joints",
   hidden_finger: "Hidden fingers",
   miter: "Mitered edges",
   butt_front_back: "Butted with end grain on front/back",
   butt_sides: "Butted with end grain on sides",
-};
-const wallConnectionHelp = {
-  finger: "Interlocking finger joints at all four vertical corners.",
-  hidden_finger: "Alternating blind pockets interlock behind thin exterior skins, with clearance behind each closing skin.",
-  miter: "Full-length walls meet with 45° beveled corner edges.",
-  butt_front_back: "Side walls run full depth, exposing their end grain on the front and back.",
-  butt_sides: "Front and back walls run full width, exposing their end grain on both sides.",
 };
 const dimensionBasisHelp = {
   exterior: "Width, depth, and height are the box's exterior extents.",
@@ -136,7 +121,6 @@ function updateDimensionBasisControls() {
 }
 
 function updateWallConnectionControls() {
-  document.querySelector("#wallConnectionHelp").textContent = wallConnectionHelp[wallConnectionSelect.value];
   updateJoineryControls();
 }
 
@@ -160,7 +144,6 @@ function updateBottomTypeControls() {
   const hasBottom = bottomType !== "none";
   capturedSettingRows.forEach((row) => { row.hidden = !captured; });
   bottomSettingRows.forEach((row) => { row.hidden = !hasBottom; });
-  document.querySelector("#bottomTypeHelp").textContent = bottomTypeHelp[bottomType];
   document.querySelector("#bottomPieceLabel").textContent = bottomTypeLabels[bottomType];
   document.querySelector("#bottomPieceOption").hidden = !hasBottom;
   document.querySelector("#bottomLegendLabel").textContent = bottomTypeLabels[bottomType];
