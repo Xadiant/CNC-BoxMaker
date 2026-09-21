@@ -1088,6 +1088,7 @@ function drawDrawing() {
   const styles = {
     CUT_OUTSIDE: { color: "#e9ede5", width: 1.05, dash: [] },
     POCKET_BOTTOM_SLOT: { color: "#72d8d3", width: 1, dash: [5, 3] },
+    MITER_END: { color: "#f1b65c", width: 1, dash: [6, 3] },
     ANNOTATION: { color: "#748073", width: 1, dash: [] },
   };
 

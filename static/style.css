@@ -155,6 +155,7 @@ legend { width: 100%; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 1p
 .viewer-footer.empty-mode .empty-legend-item { display: block; }
 .line-swatch { width: 13px; height: 2px; display: inline-block; margin: 0 6px 2px 0; }
 .line-swatch.cut { background: #edf0ea; }.line-swatch.pocket { background: var(--cyan); }
+.line-swatch.miter { background: repeating-linear-gradient(90deg, #f1b65c 0 5px, transparent 5px 8px); }
 .drawing-tools { position: absolute; right: 13px; top: 13px; display: grid; gap: 4px; }
 .drawing-tools button { width: 28px; height: 28px; border: 1px solid #303930; border-radius: 4px; color: #9da69a; background: rgba(13,18,14,.9); cursor: pointer; }
 .drawing-tools button:hover { color: var(--accent); border-color: var(--accent-dim); }

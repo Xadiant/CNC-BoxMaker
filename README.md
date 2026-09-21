@@ -49,6 +49,9 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
 - `CUT_OUTSIDE` contains the four wall profiles and the bottom profile when one is selected.
 - Wall corners can use finger joints, 45-degree miters, or either orientation of
   a butt joint, allowing the exposed end grain to face front/back or side/side.
+- `MITER_END` contains dashed reference lines one wall thickness in from each
+  mitered edge, showing where each 45-degree bevel ends. This layer is a guide
+  and should not be cut.
 - Five bottom constructions are available: none, captured, full-footprint
   butt-bottom, wall-inset butt-inside, and finger jointed. Butt-bottom shortens
   the walls by the bottom material thickness so every mode preserves the entered

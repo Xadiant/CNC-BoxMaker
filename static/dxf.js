@@ -49,12 +49,23 @@ export function layoutToDxf(layout, units = "mm") {
   const chunks = [
     pair(0, "SECTION"), pair(2, "HEADER"), pair(9, "$ACADVER"), pair(1, "AC1024"),
     pair(9, "$INSUNITS"), pair(70, insertionUnits), ...metadata,
-    pair(0, "ENDSEC"), pair(0, "SECTION"), pair(2, "TABLES"), pair(0, "TABLE"),
-    pair(2, "LAYER"), pair(70, 3),
+    pair(0, "ENDSEC"), pair(0, "SECTION"), pair(2, "TABLES"),
+    pair(0, "TABLE"), pair(2, "LTYPE"), pair(70, 2),
+    pair(0, "LTYPE"), pair(100, "AcDbSymbolTableRecord"), pair(100, "AcDbLinetypeTableRecord"),
+    pair(2, "CONTINUOUS"), pair(70, 0), pair(3, "Solid line"), pair(72, 65), pair(73, 0), pair(40, 0),
+    pair(0, "LTYPE"), pair(100, "AcDbSymbolTableRecord"), pair(100, "AcDbLinetypeTableRecord"),
+    pair(2, "DASHED"), pair(70, 0), pair(3, "Dashed __ __"), pair(72, 65), pair(73, 2),
+    pair(40, 9 * scale), pair(49, 6 * scale), pair(74, 0), pair(49, -3 * scale), pair(74, 0),
+    pair(0, "ENDTAB"), pair(0, "TABLE"), pair(2, "LAYER"), pair(70, 4),
   ];
-  for (const [name, color] of [["CUT_OUTSIDE", 7], [pocketLayer, 5], ["ANNOTATION", 8]]) {
+  for (const [name, color, lineType] of [
+    ["CUT_OUTSIDE", 7, "CONTINUOUS"],
+    [pocketLayer, 5, "CONTINUOUS"],
+    ["MITER_END", 3, "DASHED"],
+    ["ANNOTATION", 8, "CONTINUOUS"],
+  ]) {
     chunks.push(
-      pair(0, "LAYER"), pair(2, name), pair(70, 0), pair(62, color), pair(6, "CONTINUOUS"),
+      pair(0, "LAYER"), pair(2, name), pair(70, 0), pair(62, color), pair(6, lineType),
     );
   }
   chunks.push(

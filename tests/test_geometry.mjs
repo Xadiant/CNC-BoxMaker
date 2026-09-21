@@ -318,7 +318,18 @@ test("mitered wall connections use full-length plain wall blanks", () => {
   assert.deepEqual(layout.parts.map((part) => part.width), [450, 450, 400, 400]);
   assert.ok(layout.parts.every((part) => part.mitered_edges));
   assert.ok(layout.parts.every((part) => part.profile.length === 4));
-  assert.ok(layoutToDxf(layout).includes("999\nwall_connection=miter"));
+  const miterEnds = layout.entities.filter((entity) => entity.layer === "MITER_END");
+  assert.equal(miterEnds.length, 8);
+  assert.ok(miterEnds.every((entity) => entity.type === "polyline" && !entity.closed));
+  assert.deepEqual(miterEnds.slice(0, 2).map((entity) => entity.points), [
+    [[32, 20], [32, 180]],
+    [[458, 20], [458, 180]],
+  ]);
+
+  const dxf = layoutToDxf(layout);
+  assert.ok(dxf.includes("999\nwall_connection=miter"));
+  assert.match(dxf, /2\nMITER_END\n70\n0\n62\n3\n6\nDASHED\n/);
+  assert.equal((dxf.match(/8\nMITER_END\n/g) ?? []).length, 8);
 });
 
 test("butted wall variants expose end grain on the selected pair", () => {

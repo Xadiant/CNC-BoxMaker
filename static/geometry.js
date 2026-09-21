@@ -427,6 +427,19 @@ function fingeredPanel({
       ],
     });
   }
+  if (miteredEdges) {
+    for (const endX of [jointDepth, width - jointDepth]) {
+      entities.push({
+        type: "polyline",
+        layer: "MITER_END",
+        closed: false,
+        points: [
+          [x + endX, y],
+          [x + endX, y + height],
+        ],
+      });
+    }
+  }
   entities.push({
     type: "text",
     layer: "ANNOTATION",
