@@ -98,6 +98,17 @@ test("slot parameters drive pockets and bottom engagement", () => {
   ]);
 });
 
+test("captured slot extra remains independent from joint clearance", () => {
+  const baseline = buildLayout({ ...DEFAULT, joint_clearance: 0 });
+  const changed = buildLayout({ ...DEFAULT, joint_clearance: 0.5 });
+  assert.equal(changed.manufacturing.groove_width, baseline.manufacturing.groove_width);
+  assert.equal(changed.manufacturing.groove_depth, baseline.manufacturing.groove_depth);
+  assert.deepEqual(
+    changed.parts.slice(0, 4).map((part) => part.operations.find((operation) => operation.type === "groove").rect),
+    baseline.parts.slice(0, 4).map((part) => part.operations.find((operation) => operation.type === "groove").rect),
+  );
+});
+
 test("bottom slot offset moves grooves and the captured bottom", () => {
   const layout = buildLayout({ ...DEFAULT, bottom_slot_offset: 20 });
   const grooves = layout.parts.slice(0, 4).map((part) => part.operations.find((operation) => operation.type === "groove").rect);
@@ -109,24 +120,27 @@ test("bottom slot offset moves grooves and the captured bottom", () => {
 test("missing optional values retain the established inch-derived defaults", () => {
   const spec = validateSpec({ height: 152.4, width: 457.2, depth: 406.4 });
   assert.equal(spec.finger_size, 12.7);
-  assert.equal(spec.finger_clearance, 0.254);
+  assert.equal(spec.joint_clearance, 0.254);
   assert.equal(spec.hidden_finger_skin, 1.5875);
   assert.equal(spec.wall_thickness, 12.7);
   assert.equal(spec.bottom_thickness, 6.35);
   assert.equal(spec.bottom_slot_extra, 0.53975);
   assert.equal(spec.bottom_slot_depth, 6.35);
   assert.equal(spec.bottom_slot_offset, 12.7);
+  assert.equal(spec.bottom_inset_depth, 3.175);
   assert.equal(spec.cutter_diameter, 3.175);
   assert.equal(spec.use_dogbones, true);
   assert.equal(spec.bottom_type, "captured");
   assert.equal(spec.wall_connection, "finger");
   assert.equal(spec.dimension_basis, "exterior");
+  assert.equal(validateSpec({ ...DEFAULT, finger_clearance: 0.4 }).joint_clearance, 0.4);
 });
 
 test("interior dimensions expand to the required exterior extents", () => {
   const expectedHeights = {
     none: DEFAULT.height,
     captured: DEFAULT.height + 12 + 0.53975 / 2 + DEFAULT.bottom_thickness,
+    inset: DEFAULT.height + DEFAULT.bottom_thickness,
     butt_bottom: DEFAULT.height + DEFAULT.bottom_thickness,
     butt_inside: DEFAULT.height + DEFAULT.bottom_thickness,
     finger_jointed: DEFAULT.height + DEFAULT.bottom_thickness,
@@ -156,6 +170,7 @@ test("exterior dimensions report the resulting clear interior size", () => {
   const expectedHeights = {
     none: DEFAULT.height,
     captured: DEFAULT.height - 12 - 0.53975 / 2 - DEFAULT.bottom_thickness,
+    inset: DEFAULT.height - DEFAULT.bottom_thickness,
     butt_bottom: DEFAULT.height - DEFAULT.bottom_thickness,
     butt_inside: DEFAULT.height - DEFAULT.bottom_thickness,
     finger_jointed: DEFAULT.height - DEFAULT.bottom_thickness,
@@ -204,6 +219,8 @@ test("DXF declares units, CAM layers, bulges, and saved settings", () => {
   assert.ok(dxf.includes("999\nDRAWERFORGE_SETTINGS_V1"));
   assert.ok(dxf.includes("999\nunits=mm"));
   assert.ok(dxf.includes("999\nwidth_mm=450"));
+  assert.ok(dxf.includes("999\njoint_clearance_mm=0.254"));
+  assert.ok(!dxf.includes("999\nfinger_clearance_mm="));
   assert.ok(dxf.includes("999\nbottom_slot_offset_mm=12"));
   assert.ok(dxf.includes("999\nuse_dogbones=true"));
   assert.ok(dxf.includes("999\nbottom_type=captured"));
@@ -248,7 +265,7 @@ test("dogbone arcs are integrated into wall profiles", () => {
   });
 });
 
-test("finger clearance expands both socket styles in either direction", () => {
+test("joint clearance expands both socket styles in either direction", () => {
   const clearance = 0.254;
   const tab = edgePoints([0, 0], [0, 160], "tab", 24, 12, 0, clearance).points;
   const slot = edgePoints([0, 0], [0, 160], "slot", 24, 12, 0, clearance).points;
@@ -265,7 +282,7 @@ test("finger clearance expands both socket styles in either direction", () => {
 });
 
 test("zero clearance and larger cutters alter dogbones correctly", () => {
-  const zero = buildLayout({ ...DEFAULT, finger_clearance: 0 });
+  const zero = buildLayout({ ...DEFAULT, joint_clearance: 0 });
   const zeroDogbone = zero.parts[0].operations.find((operation) => operation.type === "dogbone");
   close(Math.hypot(zeroDogbone.cx - zeroDogbone.corner[0], zeroDogbone.cy - zeroDogbone.corner[1]), zeroDogbone.radius);
 
@@ -360,6 +377,34 @@ test("butt-inside fits between the walls without changing outside dimensions", (
   assert.ok(!layout.entities.some((entity) => entity.layer === "POCKET_BOTTOM_SLOT"));
 });
 
+test("inset bottom has an exterior-size flange and a clearance-expanded perimeter pocket", () => {
+  const layout = buildLayout({
+    ...DEFAULT,
+    bottom_type: "inset",
+    bottom_inset_depth: 2,
+    joint_clearance: 0.4,
+  });
+  const bottom = layout.parts.at(-1);
+  const pockets = bottom.operations.filter((operation) => operation.type === "inset_pocket");
+  assert.deepEqual(bottom.assembly.origin, [0, 0, 0]);
+  assert.equal(layout.manufacturing.bottom_width, DEFAULT.width);
+  assert.equal(layout.manufacturing.bottom_depth, DEFAULT.depth);
+  assert.equal(layout.manufacturing.pocket_depth, 2);
+  assert.ok(layout.parts.slice(0, 4).every((part) => part.assembly.origin[2] === 4));
+  assert.ok(layout.parts.slice(0, 4).every((part) => part.height === 156));
+  assert.equal(pockets.length, 4);
+  assert.deepEqual(pockets[0], {
+    type: "inset_pocket",
+    rect: [0, 0, DEFAULT.width, DEFAULT.wall_thickness + 0.4],
+    depth: 2,
+  });
+  assert.equal(layout.entities.filter((entity) => entity.layer === "POCKET_BOTTOM_INSET").length, 4);
+  const dxf = layoutToDxf(layout);
+  assert.match(dxf, /2\nPOCKET_BOTTOM_INSET_2\.000MM\n/);
+  assert.ok(dxf.includes("999\njoint_clearance_mm=0.4"));
+  assert.ok(dxf.includes("999\nbottom_type=inset"));
+});
+
 test("finger-jointed bottom interlocks with all four wall bottoms", () => {
   const layout = buildLayout({ ...DEFAULT, bottom_type: "finger_jointed" });
   const withoutDogbones = buildLayout({ ...DEFAULT, bottom_type: "finger_jointed", use_dogbones: false });
@@ -429,7 +474,7 @@ test("hidden-finger dogbones are integrated into pocket paths", () => {
     hidden_finger_skin: 2,
   };
   const layout = buildLayout(values);
-  const clearance = validateSpec(values).finger_clearance;
+  const clearance = validateSpec(values).joint_clearance;
   const pocketPaths = layout.entities.filter((entity) => entity.layer === "POCKET_HIDDEN_FINGERS");
   assert.ok(pocketPaths.length > 0);
   assert.ok(pocketPaths.every((entity) => entity.type === "polyline"));
@@ -529,7 +574,7 @@ test("hidden-finger skin and remaining pocket depth are validated", () => {
     ...DEFAULT,
     bottom_type: "hidden_finger_jointed",
     hidden_finger_skin: 11.8,
-    finger_clearance: 0.254,
+    joint_clearance: 0.254,
   }), /clearance must be smaller/);
 });
 
@@ -547,7 +592,7 @@ test("captured-only slot constraints do not block other bottom types", () => {
 
 test("every bottom construction remains inside its assembled dimensions", () => {
   for (const bottomType of [
-    "none", "captured", "butt_bottom", "butt_inside", "finger_jointed", "hidden_finger_jointed",
+    "none", "captured", "inset", "butt_bottom", "butt_inside", "finger_jointed", "hidden_finger_jointed",
   ]) {
     const layout = buildLayout({ ...DEFAULT, bottom_type: bottomType });
     const limits = Object.values(layout.assembled_dimensions);

@@ -3,16 +3,17 @@ const FIELD_RULES = {
   width: [50, 1500, null],
   depth: [50, 1500, null],
   finger_size: [3, 100, 12.7],
-  finger_clearance: [0, 10, 0.254],
+  joint_clearance: [0, 10, 0.254],
   hidden_finger_skin: [0.5, 50, 1.5875],
   wall_thickness: [3, 50, 12.7],
   bottom_thickness: [1, 30, 6.35],
   bottom_slot_extra: [0, 10, 0.53975],
   bottom_slot_depth: [0.1, 50, 6.35],
+  bottom_inset_depth: [0.1, 30, 3.175],
   cutter_diameter: [0.1, 50, 3.175],
 };
 const BOTTOM_TYPES = new Set([
-  "none", "captured", "butt_bottom", "butt_inside", "finger_jointed", "hidden_finger_jointed",
+  "none", "captured", "inset", "butt_bottom", "butt_inside", "finger_jointed", "hidden_finger_jointed",
 ]);
 const WALL_CONNECTIONS = new Set(["finger", "hidden_finger", "miter", "butt_front_back", "butt_sides"]);
 const DIMENSION_BASES = new Set(["exterior", "interior"]);
@@ -44,9 +45,13 @@ function positiveModulo(value, divisor) {
 }
 
 export function validateSpec(values) {
+  const normalizedValues = {
+    ...values,
+    joint_clearance: values.joint_clearance ?? values.finger_clearance,
+  };
   const spec = {};
   for (const [name, [minimum, maximum, defaultValue]] of Object.entries(FIELD_RULES)) {
-    const rawValue = values[name] ?? defaultValue;
+    const rawValue = normalizedValues[name] ?? defaultValue;
     const value = typeof rawValue === "string" && rawValue.trim() === "" ? Number.NaN : Number(rawValue);
     if (!Number.isFinite(value)) throw new Error(`${name.replaceAll("_", " ")} must be a number`);
     if (value < minimum || value > maximum) {
@@ -63,7 +68,7 @@ export function validateSpec(values) {
 
   const bottomType = values.bottom_type ?? "captured";
   if (!BOTTOM_TYPES.has(bottomType)) {
-    throw new Error("bottom type must be none, captured, butt-bottom, butt-inside, finger jointed, or hidden fingers");
+    throw new Error("bottom type must be none, captured, inset, butt-bottom, butt-inside, finger jointed, or hidden fingers");
   }
   spec.bottom_type = bottomType;
 
@@ -111,8 +116,8 @@ export function validateSpec(values) {
   if (usesHiddenFingers && spec.hidden_finger_skin >= spec.wall_thickness) {
     throw new Error("hidden finger skin must be thinner than the wall material");
   }
-  if (usesHiddenFingers && spec.finger_clearance >= spec.wall_thickness - spec.hidden_finger_skin) {
-    throw new Error("finger clearance must be smaller than the hidden finger pocket depth");
+  if (usesHiddenFingers && spec.joint_clearance >= spec.wall_thickness - spec.hidden_finger_skin) {
+    throw new Error("joint clearance must be smaller than the hidden finger pocket depth");
   }
   if (spec.bottom_type === "captured") {
     if (spec.bottom_slot_depth + spec.bottom_slot_extra > spec.wall_thickness) {
@@ -124,6 +129,14 @@ export function validateSpec(values) {
     if (spec.bottom_slot_offset + spec.bottom_thickness + spec.bottom_slot_extra > exterior.height) {
       throw new Error("bottom slot offset places the slot above the panel");
     }
+  }
+  if (spec.bottom_type === "inset" && spec.bottom_inset_depth >= spec.bottom_thickness) {
+    throw new Error("bottom inset depth must be smaller than the bottom material thickness");
+  }
+  if (spec.bottom_type === "inset"
+      && (exterior.width <= 2 * (spec.wall_thickness + spec.joint_clearance)
+        || exterior.depth <= 2 * (spec.wall_thickness + spec.joint_clearance))) {
+    throw new Error("joint clearance leaves no raised center on the inset bottom");
   }
   return spec;
 }
@@ -169,7 +182,7 @@ export function edgePoints(start, end, mode, targetSize, depth, phase = 0, clear
   if (segmentCount % 2 === 0) segmentCount += 1;
   const segment = length / segmentCount;
   if (mode === "slot" && clearance >= segment) {
-    throw new Error("finger clearance must be smaller than each finger");
+    throw new Error("joint clearance must be smaller than each finger");
   }
 
   const boundaries = Array.from({ length: segmentCount + 1 }, (_, index) => segment * index);
@@ -209,7 +222,7 @@ function fingerPocketIntervals(length, targetSize, phase = 0, clearance = 0) {
   let segmentCount = Math.max(3, roundHalfEven(length / targetSize));
   if (segmentCount % 2 === 0) segmentCount += 1;
   const segment = length / segmentCount;
-  if (clearance >= segment) throw new Error("finger clearance must be smaller than each finger");
+  if (clearance >= segment) throw new Error("joint clearance must be smaller than each finger");
 
   const boundaries = Array.from({ length: segmentCount + 1 }, (_, index) => segment * index);
   if (clearance > 0) {
@@ -272,7 +285,7 @@ function dogboneOutline(points, radius, offset = 0, maximumArcStep = Math.PI / 8
   if (points.length < 3 || radius <= 0) {
     return { outline: points.map((point) => [...point]), bulges: points.map(() => 0), operations: [] };
   }
-  if (offset >= radius) throw new Error("finger clearance must be smaller than the cutter radius");
+  if (offset >= radius) throw new Error("joint clearance must be smaller than the cutter radius");
 
   const twiceArea = points.reduce((sum, current, index) => {
     const following = points[(index + 1) % points.length];
@@ -311,7 +324,7 @@ function dogboneOutline(points, radius, offset = 0, maximumArcStep = Math.PI / 8
       const projection = direction[0] * centerOffset[0] + direction[1] * centerOffset[1];
       const discriminant = radius ** 2 - (centerDistanceSquared - projection ** 2);
       if (discriminant < -1e-9) {
-        throw new Error("finger clearance is too large for the selected cutter diameter");
+        throw new Error("joint clearance is too large for the selected cutter diameter");
       }
       return projection + Math.sqrt(Math.max(0, discriminant));
     };
@@ -392,7 +405,7 @@ function dogbonePocketOutline(points, reliefIndices, radius, offset = 0, maximum
   if (!reliefIndices.length || radius <= 0) {
     return { outline: points.map((point) => [...point]), bulges: points.map(() => 0), operations: [] };
   }
-  if (offset >= radius) throw new Error("finger clearance must be smaller than the cutter radius");
+  if (offset >= radius) throw new Error("joint clearance must be smaller than the cutter radius");
 
   const reliefs = new Map();
   for (const index of reliefIndices) {
@@ -419,7 +432,7 @@ function dogbonePocketOutline(points, reliefIndices, radius, offset = 0, maximum
       const projection = direction[0] * centerOffset[0] + direction[1] * centerOffset[1];
       const discriminant = radius ** 2 - (centerDistanceSquared - projection ** 2);
       if (discriminant < -1e-9) {
-        throw new Error("finger clearance is too large for the selected cutter diameter");
+        throw new Error("joint clearance is too large for the selected cutter diameter");
       }
       return projection + Math.sqrt(Math.max(0, discriminant));
     };
@@ -512,7 +525,7 @@ function fingeredPanel({
   groove,
   grooveDepth,
   cutterDiameter,
-  fingerClearance,
+  jointClearance,
   useDogbones,
   bottomMode = "plain",
   bottomJointDepth = jointDepth,
@@ -529,11 +542,11 @@ function fingeredPanel({
   const [bottomStartInset, bottomEndInset] = bottomJointInsets;
   const corners = [
     [[0, 0], [bottomStartInset, 0], "plain", 0, jointDepth, 0],
-    [[bottomStartInset, 0], [width - bottomEndInset, 0], bottomMode, bottomPhase, bottomJointDepth, fingerClearance],
+    [[bottomStartInset, 0], [width - bottomEndInset, 0], bottomMode, bottomPhase, bottomJointDepth, jointClearance],
     [[width - bottomEndInset, 0], [width, 0], "plain", 0, jointDepth, 0],
-    [[width, 0], [width, height], verticalMode, 0, verticalJointDepth, fingerClearance],
+    [[width, 0], [width, height], verticalMode, 0, verticalJointDepth, jointClearance],
     [[width, height], [0, height], "plain", 0, jointDepth, 0],
-    [[0, height], [0, 0], verticalMode, 0, verticalJointDepth, fingerClearance],
+    [[0, height], [0, 0], verticalMode, 0, verticalJointDepth, jointClearance],
   ];
   const outline = [];
   for (const [start, end, mode, phase, depth, clearance] of corners) {
@@ -544,7 +557,7 @@ function fingeredPanel({
 
   const squareOutline = cleanPolyline(outline, { closed: true });
   const routedOutline = useDogbones
-    ? dogboneOutline(squareOutline, cutterDiameter / 2, fingerClearance)
+    ? dogboneOutline(squareOutline, cutterDiameter / 2, jointClearance)
     : { outline: squareOutline, bulges: squareOutline.map(() => 0), operations: [] };
   const translatedOutline = routedOutline.outline.map(([px, py]) => [px + x, py + y]);
   const operations = [...routedOutline.operations];
@@ -605,7 +618,7 @@ function fingeredPanel({
       if (px > 1e-9) reliefIndices.push(3);
     }
     const routedPocket = useDogbones
-      ? dogbonePocketOutline(pocketOutline, reliefIndices, cutterDiameter / 2, fingerClearance)
+      ? dogbonePocketOutline(pocketOutline, reliefIndices, cutterDiameter / 2, jointClearance)
       : { outline: pocketOutline, bulges: pocketOutline.map(() => 0), operations: [] };
     operations.push(...routedPocket.operations.map((operation) => ({
       ...operation,
@@ -620,7 +633,7 @@ function fingeredPanel({
     });
   };
   if (hiddenVerticalPockets) {
-    const reach = hiddenVerticalPocketReach ?? jointDepth + fingerClearance;
+    const reach = hiddenVerticalPocketReach ?? jointDepth + jointClearance;
     if (hiddenVerticalPocketBaseReach > 0) {
       addHiddenPocket([0, 0, hiddenVerticalPocketBaseReach, height], "left");
       addHiddenPocket([
@@ -634,7 +647,7 @@ function fingeredPanel({
       height,
       fingerSize,
       hiddenVerticalPocketPhase,
-      fingerClearance,
+      jointClearance,
     )) {
       addHiddenPocket([
         hiddenVerticalPocketBaseReach,
@@ -651,9 +664,9 @@ function fingeredPanel({
     }
   }
   if (hiddenBottomPockets) {
-    const reach = bottomJointDepth + fingerClearance;
+    const reach = bottomJointDepth + jointClearance;
     const runLength = width - bottomStartInset - bottomEndInset;
-    for (const [start, end] of fingerPocketIntervals(runLength, fingerSize, bottomPhase, fingerClearance)) {
+    for (const [start, end] of fingerPocketIntervals(runLength, fingerSize, bottomPhase, jointClearance)) {
       addHiddenPocket([
         bottomStartInset + start,
         0,
@@ -707,11 +720,12 @@ function bottomPart({
   fingerSize,
   jointDepth,
   cutterDiameter,
-  fingerClearance,
   useDogbones,
   label,
   assembly,
   edgePhase = 0,
+  insetPockets = [],
+  insetPocketDepth = 0,
 }) {
   const edges = [
     [[0, 0], [coreWidth, 0]],
@@ -751,6 +765,20 @@ function bottomPart({
       points: translatedOutline,
       bulges: routedOutline.bulges,
     },
+    ...insetPockets.map((rect) => {
+      const [px, py, pw, ph] = rect;
+      return {
+        type: "polyline",
+        layer: "POCKET_BOTTOM_INSET",
+        closed: true,
+        points: [
+          [x + px, y + py],
+          [x + px + pw, y + py],
+          [x + px + pw, y + py + ph],
+          [x + px, y + py + ph],
+        ],
+      };
+    }),
     {
       type: "text",
       layer: "ANNOTATION",
@@ -767,7 +795,10 @@ function bottomPart({
     thickness,
     profile: routedOutline.outline,
     diagnostic_profile: squareOutline,
-    operations: [...routedOutline.operations],
+    operations: [
+      ...routedOutline.operations,
+      ...insetPockets.map((rect) => ({ type: "inset_pocket", rect, depth: insetPocketDepth })),
+    ],
     layout_origin: [x, y],
     assembly,
     entities,
@@ -795,6 +826,7 @@ export function buildLayout(values) {
   const wall = spec.wall_thickness;
   const hasBottom = spec.bottom_type !== "none";
   const capturedBottom = spec.bottom_type === "captured";
+  const insetBottom = spec.bottom_type === "inset";
   const fingerJointedBottom = spec.bottom_type === "finger_jointed";
   const hiddenFingerBottom = spec.bottom_type === "hidden_finger_jointed";
   const hasFingerBottom = fingerJointedBottom || hiddenFingerBottom;
@@ -802,11 +834,13 @@ export function buildLayout(values) {
   const fingerWalls = spec.wall_connection === "finger" || hiddenFingerWalls;
   const miteredWalls = spec.wall_connection === "miter";
   const hiddenPocketDepth = wall - spec.hidden_finger_skin;
-  const hiddenTabDepth = hiddenPocketDepth - spec.finger_clearance;
+  const hiddenTabDepth = hiddenPocketDepth - spec.joint_clearance;
   const clearance = capturedBottom ? spec.bottom_slot_extra : 0;
   const slotHeight = capturedBottom ? spec.bottom_thickness + clearance : 0;
   const slotY = capturedBottom ? spec.bottom_slot_offset : 0;
-  const pocketDepth = capturedBottom ? roundTo(spec.bottom_slot_depth + clearance, 12) : 0;
+  const pocketDepth = capturedBottom
+    ? roundTo(spec.bottom_slot_depth + clearance, 12)
+    : insetBottom ? spec.bottom_inset_depth : 0;
   const slotExtension = pocketDepth;
   const engagement = capturedBottom ? spec.bottom_slot_depth : 0;
   const fullWidthFronts = miteredWalls || hiddenFingerWalls || spec.wall_connection === "butt_sides";
@@ -819,7 +853,9 @@ export function buildLayout(values) {
   const sideOriginY = hiddenFingerWalls ? spec.hidden_finger_skin : insetSides ? wall : 0;
   const gap = Math.max(18, wall * 3);
   const margin = 20;
-  const wallBaseZ = spec.bottom_type === "butt_bottom" ? spec.bottom_thickness : 0;
+  const wallBaseZ = spec.bottom_type === "butt_bottom"
+    ? spec.bottom_thickness
+    : insetBottom ? spec.bottom_thickness - spec.bottom_inset_depth : 0;
   const wallHeight = spec.height - wallBaseZ;
   const assembledHeight = spec.height;
 
@@ -830,7 +866,7 @@ export function buildLayout(values) {
     verticalJointDepth: wall,
     grooveDepth: pocketDepth,
     cutterDiameter: spec.cutter_diameter,
-    fingerClearance: spec.finger_clearance,
+    jointClearance: spec.joint_clearance,
     useDogbones: spec.use_dogbones,
     bottomMode: fingerJointedBottom ? "slot" : "plain",
     bottomJointDepth: spec.bottom_thickness,
@@ -857,8 +893,8 @@ export function buildLayout(values) {
       verticalMode: fingerWalls && !hiddenFingerWalls ? "tab" : "plain",
       hiddenVerticalPockets: hiddenFingerWalls,
       hiddenVerticalPocketPhase: 0,
-      hiddenVerticalPocketReach: wall + spec.finger_clearance,
-      hiddenVerticalPocketBaseReach: spec.hidden_finger_skin + spec.finger_clearance,
+      hiddenVerticalPocketReach: wall + spec.joint_clearance,
+      hiddenVerticalPocketBaseReach: spec.hidden_finger_skin + spec.joint_clearance,
       label: "FRONT",
       groove: capturedGroove(frontOriginX, spec.width),
       bottomJointInsets: frontBottomInsets,
@@ -871,8 +907,8 @@ export function buildLayout(values) {
       verticalMode: fingerWalls && !hiddenFingerWalls ? "tab" : "plain",
       hiddenVerticalPockets: hiddenFingerWalls,
       hiddenVerticalPocketPhase: 0,
-      hiddenVerticalPocketReach: wall + spec.finger_clearance,
-      hiddenVerticalPocketBaseReach: spec.hidden_finger_skin + spec.finger_clearance,
+      hiddenVerticalPocketReach: wall + spec.joint_clearance,
+      hiddenVerticalPocketBaseReach: spec.hidden_finger_skin + spec.joint_clearance,
       label: "BACK",
       groove: capturedGroove(frontOriginX, spec.width),
       bottomJointInsets: frontBottomInsets,
@@ -885,8 +921,8 @@ export function buildLayout(values) {
       verticalMode: fingerWalls && !hiddenFingerWalls ? "slot" : "plain",
       hiddenVerticalPockets: hiddenFingerWalls,
       hiddenVerticalPocketPhase: 1,
-      hiddenVerticalPocketReach: wall - spec.hidden_finger_skin + spec.finger_clearance,
-      hiddenVerticalPocketBaseReach: spec.finger_clearance,
+      hiddenVerticalPocketReach: wall - spec.hidden_finger_skin + spec.joint_clearance,
+      hiddenVerticalPocketBaseReach: spec.joint_clearance,
       label: "LEFT SIDE",
       groove: capturedGroove(sideOriginY, spec.depth),
       bottomJointInsets: sideBottomInsets,
@@ -899,8 +935,8 @@ export function buildLayout(values) {
       verticalMode: fingerWalls && !hiddenFingerWalls ? "slot" : "plain",
       hiddenVerticalPockets: hiddenFingerWalls,
       hiddenVerticalPocketPhase: 1,
-      hiddenVerticalPocketReach: wall - spec.hidden_finger_skin + spec.finger_clearance,
-      hiddenVerticalPocketBaseReach: spec.finger_clearance,
+      hiddenVerticalPocketReach: wall - spec.hidden_finger_skin + spec.joint_clearance,
+      hiddenVerticalPocketBaseReach: spec.joint_clearance,
       label: "RIGHT SIDE",
       groove: capturedGroove(sideOriginY, spec.depth),
       bottomJointInsets: sideBottomInsets,
@@ -916,6 +952,13 @@ export function buildLayout(values) {
   placements.forEach((part, index) => { part.assembly = assemblyTransforms[index]; });
 
   const bottomY = margin + 2 * (wallHeight + gap);
+  const insetPocketWidth = wall + spec.joint_clearance;
+  const insetPockets = insetBottom ? [
+    [0, 0, spec.width, insetPocketWidth],
+    [0, spec.depth - insetPocketWidth, spec.width, insetPocketWidth],
+    [0, insetPocketWidth, insetPocketWidth, spec.depth - 2 * insetPocketWidth],
+    [spec.width - insetPocketWidth, insetPocketWidth, insetPocketWidth, spec.depth - 2 * insetPocketWidth],
+  ] : [];
   const bottomConfigurations = {
     captured: {
       coreWidth: spec.width - 2 * wall + 2 * engagement,
@@ -924,6 +967,14 @@ export function buildLayout(values) {
       jointDepth: 0,
       label: "CAPTURED BOTTOM",
       assemblyOrigin: [wall - engagement, wall - engagement, slotY + clearance / 2],
+    },
+    inset: {
+      coreWidth: spec.width,
+      coreDepth: spec.depth,
+      edgeMode: "plain",
+      jointDepth: 0,
+      label: "INSET BOTTOM",
+      assemblyOrigin: [0, 0, 0],
     },
     butt_bottom: {
       coreWidth: spec.width,
@@ -972,10 +1023,11 @@ export function buildLayout(values) {
       fingerSize: spec.finger_size,
       jointDepth: bottomConfig.jointDepth,
       cutterDiameter: spec.cutter_diameter,
-      fingerClearance: spec.finger_clearance,
       useDogbones: spec.use_dogbones,
       label: bottomConfig.label,
       edgePhase: bottomConfig.edgeMode === "tab" ? 1 : 0,
+      insetPockets,
+      insetPocketDepth: insetBottom ? spec.bottom_inset_depth : 0,
       assembly: {
         origin: bottomConfig.assemblyOrigin,
         u_axis: [1, 0, 0],
@@ -1004,9 +1056,10 @@ export function buildLayout(values) {
       bottom_type: spec.bottom_type,
       wall_connection: spec.wall_connection,
       has_bottom_groove: capturedBottom,
+      has_bottom_pocket: capturedBottom || insetBottom,
       dogbones_enabled: spec.use_dogbones,
       dogbone_diameter: roundTo(spec.cutter_diameter, 3),
-      finger_clearance: roundTo(spec.finger_clearance, 3),
+      joint_clearance: roundTo(spec.joint_clearance, 3),
       hidden_finger_skin: roundTo(spec.hidden_finger_skin, 3),
       hidden_finger_pocket_depth: (hiddenFingerWalls || hiddenFingerBottom)
         ? roundTo(hiddenPocketDepth, 3)

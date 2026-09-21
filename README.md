@@ -53,14 +53,19 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
 - `MITER_END` contains dashed reference lines one wall thickness in from each
   mitered edge, showing where each 45-degree bevel ends. This layer is a guide
   and should not be cut.
-- Six bottom constructions are available: none, captured, full-footprint
-  butt-bottom, wall-inset butt-inside, through-finger jointed, and hidden-finger
-  jointed. The hidden version fits shortened bottom tabs into blind pockets on
-  the inside faces of all four walls. Butt-bottom shortens the walls by the
-  bottom material thickness so every mode preserves the entered outside height.
+- Seven bottom constructions are available: none, captured, rabbeted inset,
+  full-footprint butt-bottom, wall-inset butt-inside, through-finger jointed,
+  and hidden-finger jointed. The inset bottom has a full exterior-size flange
+  and a raised center that fits between the walls; its perimeter is pocketed by
+  the selected inset depth. The hidden-finger version fits shortened bottom
+  tabs into blind pockets on the inside faces of all four walls. Wall heights
+  are adjusted where needed so every mode preserves the entered outside height.
 - `POCKET_BOTTOM_SLOT_<depth><unit>` contains the captured-bottom grooves. The
   calculated pocket depth is included to three decimal places in the layer name,
   such as `POCKET_BOTTOM_SLOT_0.271IN`, and is also shown in the app.
+- `POCKET_BOTTOM_INSET_<depth><unit>` contains the four perimeter pocket regions
+  for the inset bottom. The pocket extends inward by the wall thickness plus
+  the selected joint clearance.
 - `POCKET_HIDDEN_FINGERS_<depth><unit>` contains the blind wall and bottom-joint
   pockets. Their depth is the wall material thickness minus the selected hidden
   skin thickness.
@@ -69,8 +74,9 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
 - Bottom slot offset controls the distance from the bottom edge of each wall panel to the lower edge of the captured-bottom groove.
 - Optional dogbone reliefs are built directly into the `CUT_OUTSIDE` part profiles
   as circular arcs. They are enabled by default, and their diameter follows the cutter diameter input, which
-  defaults to a 1/8-inch (3.175 mm) bit. Finger clearance defaults to 0.01 inch
-  (0.254 mm), is added to each socket's total width and depth, and shifts the
+  defaults to a 1/8-inch (3.175 mm) bit. Joint clearance defaults to 0.01 inch
+  (0.254 mm), is added to each finger socket's total width and depth and to the
+  inset bottom's perimeter pocket, and shifts the
   dogbone center the same distance back toward the corner along its 45-degree
   bisector. Hidden fingers also leave this clearance between each concealed
   finger end and the neighboring exterior skin.

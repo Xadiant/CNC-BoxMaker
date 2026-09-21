@@ -8,8 +8,10 @@ const dimensionBasisSelect = document.querySelector("#dimension_basis");
 const wallConnectionSelect = document.querySelector("#wall_connection");
 const bottomTypeSelect = document.querySelector("#bottom_type");
 const capturedSettingRows = [...document.querySelectorAll(".captured-setting")];
+const insetSettingRows = [...document.querySelectorAll(".inset-setting")];
 const bottomSettingRows = [...document.querySelectorAll(".bottom-setting")];
 const fingerJointSettingRows = [...document.querySelectorAll(".finger-joint-setting")];
+const jointClearanceSettingRows = [...document.querySelectorAll(".joint-clearance-setting")];
 const hiddenFingerSettingRows = [...document.querySelectorAll(".hidden-finger-setting")];
 const pieceCheckboxes = [...document.querySelectorAll("[data-draw-piece]")];
 const pieceDrawingCount = document.querySelector("#pieceDrawingCount");
@@ -37,6 +39,7 @@ const modelLegend = document.querySelector("#modelLegend");
 const bottomTypeLabels = {
   none: "None",
   captured: "Captured bottom",
+  inset: "Inset bottom",
   butt_bottom: "Butt-bottom",
   butt_inside: "Butt-inside",
   finger_jointed: "Finger-jointed bottom",
@@ -76,13 +79,14 @@ const fieldLimits = {
   depth: [50, 1500, 1],
   height: [25, 1000, 1],
   finger_size: [3, 100, .5],
-  finger_clearance: [0, 10, .01],
+  joint_clearance: [0, 10, .01],
   hidden_finger_skin: [.5, 50, .1],
   wall_thickness: [3, 50, .1],
   bottom_thickness: [1, 30, .1],
   bottom_slot_extra: [0, 10, .1],
   bottom_slot_depth: [.1, 50, .1],
   bottom_slot_offset: [0, 1000, .1],
+  bottom_inset_depth: [.1, 30, .1],
   cutter_diameter: [.1, 50, .001],
 };
 const inchSteps = {
@@ -90,13 +94,14 @@ const inchSteps = {
   depth: ".01",
   height: ".01",
   finger_size: ".01",
-  finger_clearance: ".001",
+  joint_clearance: ".001",
   hidden_finger_skin: ".001",
   wall_thickness: ".001",
   bottom_thickness: ".001",
   bottom_slot_extra: ".00001",
   bottom_slot_depth: ".001",
   bottom_slot_offset: ".001",
+  bottom_inset_depth: ".001",
   cutter_diameter: ".001",
 };
 
@@ -129,26 +134,32 @@ function updateJoineryControls() {
     || ["finger_jointed", "hidden_finger_jointed"].includes(bottomTypeSelect.value);
   const hasHiddenFingers = wallConnectionSelect.value === "hidden_finger"
     || bottomTypeSelect.value === "hidden_finger_jointed";
+  const hasBottomPocket = ["captured", "inset"].includes(bottomTypeSelect.value);
+  const usesJointClearance = hasFingerJoints || bottomTypeSelect.value === "inset";
   fingerJointSettingRows.forEach((row) => { row.hidden = !hasFingerJoints; });
+  jointClearanceSettingRows.forEach((row) => { row.hidden = !usesJointClearance; });
   hiddenFingerSettingRows.forEach((row) => { row.hidden = !hasHiddenFingers; });
   document.querySelector("#dogboneToggle").hidden = !hasFingerJoints;
-  document.querySelector("#joinerySettings").hidden = !hasFingerJoints
-    && bottomTypeSelect.value !== "captured";
-  document.querySelector("#grooveLegend").hidden = bottomTypeSelect.value !== "captured" && !hasHiddenFingers;
-  document.querySelector("#grooveLegendLabel").textContent = hasHiddenFingers ? "Pocket cuts" : "Bottom groove";
+  document.querySelector("#joinerySettings").hidden = !hasFingerJoints && !hasBottomPocket;
+  document.querySelector("#grooveLegend").hidden = !hasBottomPocket && !hasHiddenFingers;
+  document.querySelector("#grooveLegendLabel").textContent = hasHiddenFingers
+    ? "Pocket cuts"
+    : bottomTypeSelect.value === "inset" ? "Inset pocket" : "Bottom groove";
 }
 
 function updateBottomTypeControls() {
   const bottomType = bottomTypeSelect.value;
   const captured = bottomType === "captured";
+  const inset = bottomType === "inset";
   const hasBottom = bottomType !== "none";
   capturedSettingRows.forEach((row) => { row.hidden = !captured; });
+  insetSettingRows.forEach((row) => { row.hidden = !inset; });
   bottomSettingRows.forEach((row) => { row.hidden = !hasBottom; });
   document.querySelector("#bottomPieceLabel").textContent = bottomTypeLabels[bottomType];
   document.querySelector("#bottomPieceOption").hidden = !hasBottom;
   document.querySelector("#bottomLegendLabel").textContent = bottomTypeLabels[bottomType];
   document.querySelector("#bottomLegend").hidden = !hasBottom;
-  document.querySelector("#pocketDepthLabel").textContent = captured ? "Bottom pocket depth" : "Bottom type";
+  document.querySelector("#pocketDepthLabel").textContent = captured || inset ? "Bottom pocket depth" : "Bottom type";
   updatePieceDrawingCount();
   updateJoineryControls();
 }
@@ -206,9 +217,15 @@ function parseDxfSettings(text) {
   if (importedUnit !== "mm" && importedUnit !== "in") throw new Error("The DXF has an invalid saved unit setting");
 
   const values = {};
-  const legacyDefaults = { finger_clearance: 0.254, hidden_finger_skin: 1.5875 };
+  const legacyDefaults = {
+    joint_clearance: 0.254,
+    hidden_finger_skin: 1.5875,
+    bottom_inset_depth: 3.175,
+  };
   for (const input of inputs) {
-    const savedValue = metadata[`${input.name}_mm`];
+    const savedValue = input.name === "joint_clearance"
+      ? metadata.joint_clearance_mm ?? metadata.finger_clearance_mm
+      : metadata[`${input.name}_mm`];
     const value = savedValue === undefined && Object.hasOwn(legacyDefaults, input.name)
       ? legacyDefaults[input.name]
       : Number(savedValue);
@@ -297,15 +314,15 @@ async function updateGeometry(successMessage = "Geometry ready") {
       : result.interior_dimensions;
     dimensionCard.textContent = `${displayedBasis} · ${measure(dimensions.width).replace(` ${displayUnit}`, "")} × ${measure(dimensions.depth).replace(` ${displayUnit}`, "")} × ${measure(dimensions.height)}`;
     const hasHiddenPockets = result.manufacturing.hidden_finger_pocket_depth > 0;
-    const hasBottomPocket = result.manufacturing.has_bottom_groove;
+    const hasBottomPocket = result.manufacturing.has_bottom_pocket;
     document.querySelector("#pocketDepthLabel").textContent = hasHiddenPockets && hasBottomPocket
       ? "Hidden / bottom depth"
       : hasHiddenPockets ? "Hidden pocket depth"
-      : result.manufacturing.has_bottom_groove ? "Bottom pocket depth" : "Bottom type";
+      : hasBottomPocket ? "Bottom pocket depth" : "Bottom type";
     document.querySelector("#pocketDepth").textContent = hasHiddenPockets && hasBottomPocket
       ? `${measureFixed(result.manufacturing.hidden_finger_pocket_depth)} / ${measureFixed(result.manufacturing.pocket_depth)}`
       : hasHiddenPockets ? measureFixed(result.manufacturing.hidden_finger_pocket_depth)
-      : result.manufacturing.has_bottom_groove
+      : hasBottomPocket
         ? measureFixed(result.manufacturing.pocket_depth)
         : bottomTypeLabels[spec.bottom_type];
     document.querySelector("#dogboneSize").textContent = result.manufacturing.dogbones_enabled
@@ -450,7 +467,9 @@ function faceNormal(points) {
 
 function generatePartMesh(part, diagnostic = false) {
   const profile = diagnostic ? part.diagnostic_profile ?? part.profile : part.profile;
-  const grooves = part.operations.filter((operation) => ["groove", "hidden_finger_pocket"].includes(operation.type));
+  const grooves = part.operations.filter((operation) => [
+    "groove", "hidden_finger_pocket", "inset_pocket",
+  ].includes(operation.type));
   const hiddenFingerReliefs = part.operations.filter((operation) => operation.type === "hidden_finger_relief");
   if (!diagnostic && part.mitered_edges) {
     return finishPartMesh(miteredExtrusionMesh(profile, part.thickness));
@@ -595,7 +614,6 @@ function preparePartMeshes(parts) {
     part.diagnosticMesh = generatePartMesh(part, true);
     part.solidCells = mergeSolidCells(part.diagnosticMesh.cells);
     const fillVertices = [];
-    const lineVertices = [];
     const color = partColors[part.name] || "#bd8a4d";
     for (const face of part.mesh.faces) {
       const channels = rgbChannels(color);
@@ -606,15 +624,8 @@ function preparePartMeshes(parts) {
         }
       }
     }
-    if (part.name === "BOTTOM") {
-      for (const line of part.mesh.lines) {
-        const channels = rgbChannels(line.color);
-        for (const point of line.points) lineVertices.push(...point, ...channels, 1, 0, 0, 1);
-      }
-    }
     part.renderData = {
       fillVertices: new Float32Array(fillVertices),
-      lineVertices: new Float32Array(lineVertices),
     };
   }
 }
@@ -626,14 +637,9 @@ function uploadPartMeshes(parts) {
     const fillBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, fillBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, part.renderData.fillVertices, gl.STATIC_DRAW);
-    const lineBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, part.renderData.lineVertices, gl.STATIC_DRAW);
     part.renderMesh = {
       fillBuffer,
       fillCount: part.renderData.fillVertices.length / 10,
-      lineBuffer,
-      lineCount: part.renderData.lineVertices.length / 10,
     };
     delete part.renderData;
   }
@@ -644,7 +650,6 @@ function releasePartMeshes(parts) {
   for (const part of parts) {
     if (!part.renderMesh) continue;
     modelRenderer.gl.deleteBuffer(part.renderMesh.fillBuffer);
-    modelRenderer.gl.deleteBuffer(part.renderMesh.lineBuffer);
   }
 }
 
@@ -1258,16 +1263,6 @@ function renderSolidModel(
       gl.uniform1f(material, texturedMaterial);
       bindBuffer(part.renderMesh.fillBuffer);
       gl.drawArrays(gl.TRIANGLES, 0, part.renderMesh.fillCount);
-      if (part.renderMesh.lineCount) {
-        gl.uniform1f(alpha, partAlpha < 1 ? .2 : 1);
-        gl.uniform1f(depthBias, -0.0004);
-        gl.uniform1f(lighting, 0);
-        gl.uniform1f(directionalShading, 0);
-        gl.uniform1f(material, 0);
-        bindBuffer(part.renderMesh.lineBuffer);
-        gl.lineWidth(Math.max(1, ratio));
-        gl.drawArrays(gl.LINES, 0, part.renderMesh.lineCount);
-      }
     }
   };
 
@@ -1397,6 +1392,7 @@ function drawDrawing() {
   const styles = {
     CUT_OUTSIDE: { color: "#e9ede5", width: 1.05, dash: [] },
     POCKET_BOTTOM_SLOT: { color: "#72d8d3", width: 1, dash: [5, 3] },
+    POCKET_BOTTOM_INSET: { color: "#72d8d3", width: 1, dash: [5, 3] },
     POCKET_HIDDEN_FINGERS: { color: "#72d8d3", width: 1, dash: [5, 3] },
     MITER_END: { color: "#f1b65c", width: 1, dash: [6, 3] },
     ANNOTATION: { color: "#748073", width: 1, dash: [] },
