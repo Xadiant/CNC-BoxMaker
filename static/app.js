@@ -4,6 +4,7 @@ import { layoutToDxf } from "./dxf.js";
 const form = document.querySelector("#boxForm");
 const inputs = [...form.querySelectorAll('input[type="number"]')];
 const dogboneCheckbox = document.querySelector("#use_dogbones");
+const dimensionBasisSelect = document.querySelector("#dimension_basis");
 const wallConnectionSelect = document.querySelector("#wall_connection");
 const bottomTypeSelect = document.querySelector("#bottom_type");
 const capturedSettingRows = [...document.querySelectorAll(".captured-setting")];
@@ -57,6 +58,10 @@ const wallConnectionHelp = {
   butt_front_back: "Side walls run full depth, exposing their end grain on the front and back.",
   butt_sides: "Front and back walls run full width, exposing their end grain on both sides.",
 };
+const dimensionBasisHelp = {
+  exterior: "Width, depth, and height are the box's exterior extents.",
+  interior: "Width and depth are clear between the walls; height is clear above the finished bottom.",
+};
 
 let displayUnit = "in";
 let spec = readSpec();
@@ -102,9 +107,16 @@ function readSpec() {
   return {
     ...Object.fromEntries(inputs.map((input) => [input.name, Number(input.value) * factor])),
     use_dogbones: dogboneCheckbox.checked,
+    dimension_basis: dimensionBasisSelect.value,
     wall_connection: wallConnectionSelect.value,
     bottom_type: bottomTypeSelect.value,
   };
+}
+
+function updateDimensionBasisControls() {
+  const basis = dimensionBasisSelect.value;
+  document.querySelector("#dimensionBasisHelp").textContent = dimensionBasisHelp[basis];
+  document.querySelector("#overallSizeLegend").textContent = `${basis === "interior" ? "Interior" : "Exterior"} size`;
 }
 
 function updateWallConnectionControls() {
@@ -211,12 +223,17 @@ function parseDxfSettings(text) {
   if (!Object.hasOwn(wallConnectionLabels, savedWallConnection)) {
     throw new Error("The DXF has an invalid saved wall connection");
   }
+  const savedDimensionBasis = metadata.dimension_basis ?? "exterior";
+  if (!Object.hasOwn(dimensionBasisHelp, savedDimensionBasis)) {
+    throw new Error("The DXF has an invalid saved dimension reference");
+  }
   return {
     units: importedUnit,
     values,
     useDogbones: savedDogboneSetting === undefined ? true : savedDogboneSetting === "true",
     bottomType: savedBottomType,
     wallConnection: savedWallConnection,
+    dimensionBasis: savedDimensionBasis,
   };
 }
 
@@ -267,8 +284,11 @@ async function updateGeometry(successMessage = "Geometry ready") {
     errorMessage.hidden = true;
     downloadButton.disabled = false;
     document.querySelector("#partCount").textContent = String(result.parts.length);
-    const dimensions = result.assembled_dimensions;
-    dimensionCard.textContent = `${measure(dimensions.width).replace(` ${displayUnit}`, "")} × ${measure(dimensions.depth).replace(` ${displayUnit}`, "")} × ${measure(dimensions.height)}`;
+    const displayedBasis = spec.dimension_basis === "interior" ? "Exterior" : "Interior";
+    const dimensions = displayedBasis === "Exterior"
+      ? result.assembled_dimensions
+      : result.interior_dimensions;
+    dimensionCard.textContent = `${displayedBasis} · ${measure(dimensions.width).replace(` ${displayUnit}`, "")} × ${measure(dimensions.depth).replace(` ${displayUnit}`, "")} × ${measure(dimensions.height)}`;
     document.querySelector("#pocketDepth").textContent = result.manufacturing.has_bottom_groove
       ? measureFixed(result.manufacturing.pocket_depth)
       : bottomTypeLabels[spec.bottom_type];
@@ -1236,6 +1256,8 @@ dxfSettingsFile.addEventListener("change", async () => {
     dogboneCheckbox.checked = imported.useDogbones;
     wallConnectionSelect.value = imported.wallConnection;
     bottomTypeSelect.value = imported.bottomType;
+    dimensionBasisSelect.value = imported.dimensionBasis;
+    updateDimensionBasisControls();
     updateWallConnectionControls();
     updateBottomTypeControls();
     spec = readSpec();
@@ -1249,6 +1271,10 @@ dxfSettingsFile.addEventListener("change", async () => {
 
 inputs.forEach((input) => input.addEventListener("input", scheduleUpdate));
 dogboneCheckbox.addEventListener("change", scheduleUpdate);
+dimensionBasisSelect.addEventListener("change", () => {
+  updateDimensionBasisControls();
+  scheduleUpdate();
+});
 wallConnectionSelect.addEventListener("change", () => {
   updateWallConnectionControls();
   scheduleUpdate();
@@ -1274,4 +1300,5 @@ new ResizeObserver(() => {
 
 updateBottomTypeControls();
 updateWallConnectionControls();
+updateDimensionBasisControls();
 updateGeometry();

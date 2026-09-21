@@ -19,6 +19,11 @@ Then open <http://127.0.0.1:8000>. Inputs default to inches; use the **MM / IN**
 switch in the header to change units. The downloaded DXF uses the selected unit
 system too.
 
+The dimension-reference dropdown accepts either exterior extents or clear
+interior dimensions. Interior width and depth are measured between the inside
+wall faces. Interior height is measured from the finished top of the selected
+bottom to the open top (or is simply the wall height when no bottom is used).
+
 Because the application is entirely static, the contents of `static/` can also
 be deployed to any static web host without Python.
 
@@ -40,7 +45,7 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
 - Box settings are embedded as standard DXF `999` comments. Use **Load
   settings from DXF** to restore the saved dimensions, materials, joinery, cutter,
   and unit selection. DXFs made before this feature remain valid but have no
-  settings to restore.
+  dimension-reference setting and therefore load as exterior dimensions.
 - `CUT_OUTSIDE` contains the four wall profiles and the bottom profile when one is selected.
 - Wall corners can use finger joints, 45-degree miters, or either orientation of
   a butt joint, allowing the exposed end grain to face front/back or side/side.

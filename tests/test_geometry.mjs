@@ -119,6 +119,62 @@ test("missing optional values retain the established inch-derived defaults", () 
   assert.equal(spec.use_dogbones, true);
   assert.equal(spec.bottom_type, "captured");
   assert.equal(spec.wall_connection, "finger");
+  assert.equal(spec.dimension_basis, "exterior");
+});
+
+test("interior dimensions expand to the required exterior extents", () => {
+  const expectedHeights = {
+    none: DEFAULT.height,
+    captured: DEFAULT.height + 12 + 0.53975 / 2 + DEFAULT.bottom_thickness,
+    butt_bottom: DEFAULT.height + DEFAULT.bottom_thickness,
+    butt_inside: DEFAULT.height + DEFAULT.bottom_thickness,
+    finger_jointed: DEFAULT.height + DEFAULT.bottom_thickness,
+  };
+  for (const [bottomType, expectedHeight] of Object.entries(expectedHeights)) {
+    const layout = buildLayout({
+      ...DEFAULT,
+      dimension_basis: "interior",
+      bottom_type: bottomType,
+    });
+    assert.deepEqual(layout.spec, {
+      ...validateSpec({ ...DEFAULT, dimension_basis: "interior", bottom_type: bottomType }),
+    });
+    assert.equal(layout.assembled_dimensions.width, DEFAULT.width + 2 * DEFAULT.wall_thickness);
+    assert.equal(layout.assembled_dimensions.depth, DEFAULT.depth + 2 * DEFAULT.wall_thickness);
+    close(layout.assembled_dimensions.height, expectedHeight);
+    assert.deepEqual(layout.interior_dimensions, {
+      width: DEFAULT.width,
+      depth: DEFAULT.depth,
+      height: DEFAULT.height,
+    });
+  }
+});
+
+test("exterior dimensions report the resulting clear interior size", () => {
+  const expectedHeights = {
+    none: DEFAULT.height,
+    captured: DEFAULT.height - 12 - 0.53975 / 2 - DEFAULT.bottom_thickness,
+    butt_bottom: DEFAULT.height - DEFAULT.bottom_thickness,
+    butt_inside: DEFAULT.height - DEFAULT.bottom_thickness,
+    finger_jointed: DEFAULT.height - DEFAULT.bottom_thickness,
+  };
+  for (const [bottomType, expectedHeight] of Object.entries(expectedHeights)) {
+    const layout = buildLayout({ ...DEFAULT, bottom_type: bottomType });
+    assert.equal(layout.interior_dimensions.width, DEFAULT.width - 2 * DEFAULT.wall_thickness);
+    assert.equal(layout.interior_dimensions.depth, DEFAULT.depth - 2 * DEFAULT.wall_thickness);
+    close(layout.interior_dimensions.height, expectedHeight);
+  }
+});
+
+test("interior dimension reference is validated and saved in DXF metadata", () => {
+  const layout = buildLayout({ ...DEFAULT, dimension_basis: "interior" });
+  assert.equal(layout.spec.width, DEFAULT.width);
+  assert.equal(layout.spec.height, DEFAULT.height);
+  assert.ok(layoutToDxf(layout).includes("999\ndimension_basis=interior"));
+  assert.throws(
+    () => buildLayout({ ...DEFAULT, dimension_basis: "unsupported" }),
+    /dimension reference/,
+  );
 });
 
 test("invalid slot placement and depth are rejected", () => {

@@ -55,7 +55,7 @@ h2 { font-size: 17px; }
 fieldset { border: 0; padding: 0; margin: 0 0 25px; }
 fieldset[hidden], .dogbone-toggle[hidden] { display: none; }
 legend { width: 100%; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 1px solid var(--border); color: #b8c0b6; font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
-.wall-connection-fieldset, .bottom-type-fieldset { margin-bottom: 18px; }
+.dimension-basis-fieldset, .wall-connection-fieldset, .bottom-type-fieldset { margin-bottom: 18px; }
 .select-row { display: grid; grid-template-columns: 1fr 140px; align-items: center; gap: 12px; margin-top: 12px; color: #c8cec5; font-size: 12px; }
 .select-row select { width: 100%; height: 38px; padding: 0 28px 0 10px; border: 1px solid #343d34; border-radius: 5px; outline: 0; color: var(--text); background: #0d120e; font-size: 11px; cursor: pointer; }
 .select-row select:focus { border-color: var(--accent-dim); box-shadow: 0 0 0 3px rgba(201, 242, 71, .07); }

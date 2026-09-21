@@ -12,6 +12,7 @@ const FIELD_RULES = {
 };
 const BOTTOM_TYPES = new Set(["none", "captured", "butt_bottom", "butt_inside", "finger_jointed"]);
 const WALL_CONNECTIONS = new Set(["finger", "miter", "butt_front_back", "butt_sides"]);
+const DIMENSION_BASES = new Set(["exterior", "interior"]);
 
 function distance(first, second) {
   return Math.hypot(first[0] - second[0], first[1] - second[1]);
@@ -69,6 +70,12 @@ export function validateSpec(values) {
   }
   spec.wall_connection = wallConnection;
 
+  const dimensionBasis = values.dimension_basis ?? "exterior";
+  if (!DIMENSION_BASES.has(dimensionBasis)) {
+    throw new Error("dimension reference must be exterior or interior");
+  }
+  spec.dimension_basis = dimensionBasis;
+
   const rawOffset = values.bottom_slot_offset ?? spec.wall_thickness;
   const bottomSlotOffset = typeof rawOffset === "string" && rawOffset.trim() === ""
     ? Number.NaN
@@ -79,18 +86,19 @@ export function validateSpec(values) {
   }
   spec.bottom_slot_offset = bottomSlotOffset;
 
-  if (spec.width <= spec.wall_thickness * 3) {
+  const exterior = exteriorDimensions(spec);
+  if (exterior.width <= spec.wall_thickness * 3) {
     throw new Error("width must be more than three wall thicknesses");
   }
-  if (spec.depth <= spec.wall_thickness * 3) {
+  if (exterior.depth <= spec.wall_thickness * 3) {
     throw new Error("depth must be more than three wall thicknesses");
   }
   const minimumHeight = spec.wall_thickness * 2
     + (spec.bottom_type === "none" ? 0 : spec.bottom_thickness);
-  if (spec.height <= minimumHeight) {
+  if (exterior.height <= minimumHeight) {
     throw new Error("height is too small for the selected materials");
   }
-  const wallPanelHeight = spec.height
+  const wallPanelHeight = exterior.height
     - (spec.bottom_type === "butt_bottom" ? spec.bottom_thickness : 0);
   if (spec.finger_size > wallPanelHeight / 2) {
     throw new Error("finger size must be no more than half the box height");
@@ -102,11 +110,37 @@ export function validateSpec(values) {
     if (spec.bottom_slot_extra >= spec.bottom_slot_depth) {
       throw new Error("bottom slot extra must be smaller than the slot depth");
     }
-    if (spec.bottom_slot_offset + spec.bottom_thickness + spec.bottom_slot_extra > spec.height) {
+    if (spec.bottom_slot_offset + spec.bottom_thickness + spec.bottom_slot_extra > exterior.height) {
       throw new Error("bottom slot offset places the slot above the panel");
     }
   }
   return spec;
+}
+
+function interiorFloorTop(spec) {
+  if (spec.bottom_type === "captured") {
+    return spec.bottom_slot_offset + spec.bottom_slot_extra / 2 + spec.bottom_thickness;
+  }
+  return spec.bottom_type === "none" ? 0 : spec.bottom_thickness;
+}
+
+function exteriorDimensions(spec) {
+  if (spec.dimension_basis !== "interior") {
+    return { width: spec.width, depth: spec.depth, height: spec.height };
+  }
+  return {
+    width: spec.width + 2 * spec.wall_thickness,
+    depth: spec.depth + 2 * spec.wall_thickness,
+    height: spec.height + interiorFloorTop(spec),
+  };
+}
+
+function interiorDimensions(spec) {
+  return {
+    width: spec.width - 2 * spec.wall_thickness,
+    depth: spec.depth - 2 * spec.wall_thickness,
+    height: spec.height - interiorFloorTop(spec),
+  };
 }
 
 export function edgePoints(start, end, mode, targetSize, depth, phase = 0, clearance = 0) {
@@ -508,7 +542,8 @@ function entityBounds(entities) {
 }
 
 export function buildLayout(values) {
-  const spec = validateSpec(values);
+  const requestedSpec = validateSpec(values);
+  const spec = { ...requestedSpec, ...exteriorDimensions(requestedSpec) };
   const wall = spec.wall_thickness;
   const hasBottom = spec.bottom_type !== "none";
   const capturedBottom = spec.bottom_type === "captured";
@@ -673,12 +708,13 @@ export function buildLayout(values) {
   const entities = placements.flatMap((part) => part.entities);
   return {
     units: "mm",
-    spec: { ...spec },
+    spec: { ...requestedSpec },
     assembled_dimensions: {
       width: spec.width,
       depth: spec.depth,
       height: assembledHeight,
     },
+    interior_dimensions: interiorDimensions(spec),
     entities,
     parts: placements.map(({ entities: _entities, ...part }) => part),
     bounds: entityBounds(entities),
