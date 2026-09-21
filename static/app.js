@@ -4,9 +4,11 @@ import { layoutToDxf } from "./dxf.js";
 const form = document.querySelector("#drawerForm");
 const inputs = [...form.querySelectorAll('input[type="number"]')];
 const dogboneCheckbox = document.querySelector("#use_dogbones");
+const wallConnectionSelect = document.querySelector("#wall_connection");
 const bottomTypeSelect = document.querySelector("#bottom_type");
 const capturedSettingRows = [...document.querySelectorAll(".captured-setting")];
 const bottomSettingRows = [...document.querySelectorAll(".bottom-setting")];
+const fingerJointSettingRows = [...document.querySelectorAll(".finger-joint-setting")];
 const pieceCheckboxes = [...document.querySelectorAll("[data-draw-piece]")];
 const pieceDrawingCount = document.querySelector("#pieceDrawingCount");
 const modelCanvas = document.querySelector("#modelCanvas");
@@ -42,6 +44,18 @@ const bottomTypeHelp = {
   butt_bottom: "Covers the outside footprint below shortened walls while preserving the requested overall height.",
   butt_inside: "Fits between the four walls at the bottom of the box.",
   finger_jointed: "Interlocks with finger joints along the bottoms of all four walls.",
+};
+const wallConnectionLabels = {
+  finger: "Finger joints",
+  miter: "Mitered edges",
+  butt_front_back: "Butted with end grain on front/back",
+  butt_sides: "Butted with end grain on sides",
+};
+const wallConnectionHelp = {
+  finger: "Interlocking finger joints at all four vertical corners.",
+  miter: "Full-length walls meet with 45° beveled corner edges.",
+  butt_front_back: "Side walls run full depth, exposing their end grain on the front and back.",
+  butt_sides: "Front and back walls run full width, exposing their end grain on both sides.",
 };
 
 let displayUnit = "in";
@@ -88,8 +102,23 @@ function readSpec() {
   return {
     ...Object.fromEntries(inputs.map((input) => [input.name, Number(input.value) * factor])),
     use_dogbones: dogboneCheckbox.checked,
+    wall_connection: wallConnectionSelect.value,
     bottom_type: bottomTypeSelect.value,
   };
+}
+
+function updateWallConnectionControls() {
+  document.querySelector("#wallConnectionHelp").textContent = wallConnectionHelp[wallConnectionSelect.value];
+  updateJoineryControls();
+}
+
+function updateJoineryControls() {
+  const hasFingerJoints = wallConnectionSelect.value === "finger"
+    || bottomTypeSelect.value === "finger_jointed";
+  fingerJointSettingRows.forEach((row) => { row.hidden = !hasFingerJoints; });
+  document.querySelector("#dogboneToggle").hidden = !hasFingerJoints;
+  document.querySelector("#joinerySettings").hidden = !hasFingerJoints
+    && bottomTypeSelect.value !== "captured";
 }
 
 function updateBottomTypeControls() {
@@ -106,6 +135,7 @@ function updateBottomTypeControls() {
   document.querySelector("#grooveLegend").hidden = !captured;
   document.querySelector("#pocketDepthLabel").textContent = captured ? "Bottom pocket depth" : "Bottom type";
   updatePieceDrawingCount();
+  updateJoineryControls();
 }
 
 function selectedPieceNames() {
@@ -177,11 +207,16 @@ function parseDxfSettings(text) {
   if (!Object.hasOwn(bottomTypeLabels, savedBottomType)) {
     throw new Error("The DXF has an invalid saved bottom type");
   }
+  const savedWallConnection = metadata.wall_connection ?? "finger";
+  if (!Object.hasOwn(wallConnectionLabels, savedWallConnection)) {
+    throw new Error("The DXF has an invalid saved wall connection");
+  }
   return {
     units: importedUnit,
     values,
     useDogbones: savedDogboneSetting === undefined ? true : savedDogboneSetting === "true",
     bottomType: savedBottomType,
+    wallConnection: savedWallConnection,
   };
 }
 
@@ -321,11 +356,46 @@ function directExtrusionMesh(profile, thickness) {
   return { faces, lines, cells: [] };
 }
 
+function miteredExtrusionMesh(profile, thickness) {
+  const minU = Math.min(...profile.map(([u]) => u));
+  const maxU = Math.max(...profile.map(([u]) => u));
+  const innerProfile = profile.map(([u, v]) => [
+    Math.abs(u - minU) <= 1e-9 ? u + thickness
+      : Math.abs(u - maxU) <= 1e-9 ? u - thickness : u,
+    v,
+  ]);
+  const faces = [];
+  const triangles = triangulatePolygon(profile.map(([x, y]) => ({ x, y })));
+  for (const triangle of triangles) {
+    faces.push({ surface: "major", points: [...triangle].reverse().map((index) => [...profile[index], 0]) });
+    faces.push({ surface: "major", points: triangle.map((index) => [...innerProfile[index], thickness]) });
+  }
+  const lines = [];
+  for (let index = 0; index < profile.length; index++) {
+    const nextIndex = (index + 1) % profile.length;
+    const current = profile[index], next = profile[nextIndex];
+    const innerCurrent = innerProfile[index], innerNext = innerProfile[nextIndex];
+    faces.push({
+      surface: "edge",
+      points: [[...current, 0], [...next, 0], [...innerNext, thickness], [...innerCurrent, thickness]],
+    });
+    lines.push({ color: "#49331f", points: [[...current, 0], [...next, 0]] });
+    lines.push({ color: "#49331f", points: [[...innerCurrent, thickness], [...innerNext, thickness]] });
+    lines.push({ color: "#49331f", points: [[...current, 0], [...innerCurrent, thickness]] });
+  }
+  return { faces, lines, cells: [] };
+}
+
 function partMesh(part, diagnostic = false) {
   const cacheKey = diagnostic ? "_diagnosticMesh" : "_mesh";
   if (part[cacheKey]) return part[cacheKey];
   const profile = diagnostic ? part.diagnostic_profile ?? part.profile : part.profile;
   const grooves = part.operations.filter((operation) => operation.type === "groove");
+  if (!diagnostic && part.mitered_edges) {
+    const mesh = miteredExtrusionMesh(profile, part.thickness);
+    part[cacheKey] = mesh;
+    return mesh;
+  }
   if (!diagnostic && !grooves.length) {
     const mesh = directExtrusionMesh(profile, part.thickness);
     part[cacheKey] = mesh;
@@ -1164,7 +1234,9 @@ dxfSettingsFile.addEventListener("change", async () => {
     clearTimeout(updateTimer);
     showMillimetreValues(imported.values, imported.units);
     dogboneCheckbox.checked = imported.useDogbones;
+    wallConnectionSelect.value = imported.wallConnection;
     bottomTypeSelect.value = imported.bottomType;
+    updateWallConnectionControls();
     updateBottomTypeControls();
     spec = readSpec();
     await updateGeometry(`Settings loaded from ${file.name}`);
@@ -1177,6 +1249,10 @@ dxfSettingsFile.addEventListener("change", async () => {
 
 inputs.forEach((input) => input.addEventListener("input", scheduleUpdate));
 dogboneCheckbox.addEventListener("change", scheduleUpdate);
+wallConnectionSelect.addEventListener("change", () => {
+  updateWallConnectionControls();
+  scheduleUpdate();
+});
 bottomTypeSelect.addEventListener("change", () => {
   updateBottomTypeControls();
   scheduleUpdate();
@@ -1197,4 +1273,5 @@ new ResizeObserver(() => {
 }).observe(document.querySelector(".workspace"));
 
 updateBottomTypeControls();
+updateWallConnectionControls();
 updateGeometry();

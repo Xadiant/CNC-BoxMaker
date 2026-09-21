@@ -11,6 +11,7 @@ const FIELD_RULES = {
   cutter_diameter: [0.1, 50, 3.175],
 };
 const BOTTOM_TYPES = new Set(["none", "captured", "butt_bottom", "butt_inside", "finger_jointed"]);
+const WALL_CONNECTIONS = new Set(["finger", "miter", "butt_front_back", "butt_sides"]);
 
 function distance(first, second) {
   return Math.hypot(first[0] - second[0], first[1] - second[1]);
@@ -61,6 +62,12 @@ export function validateSpec(values) {
     throw new Error("bottom type must be none, captured, butt-bottom, butt-inside, or finger jointed");
   }
   spec.bottom_type = bottomType;
+
+  const wallConnection = values.wall_connection ?? "finger";
+  if (!WALL_CONNECTIONS.has(wallConnection)) {
+    throw new Error("wall connection must be finger, miter, butt-front/back, or butt-sides");
+  }
+  spec.wall_connection = wallConnection;
 
   const rawOffset = values.bottom_slot_offset ?? spec.wall_thickness;
   const bottomSlotOffset = typeof rawOffset === "string" && rawOffset.trim() === ""
@@ -333,6 +340,7 @@ function fingeredPanel({
   bottomJointDepth = jointDepth,
   bottomJointInsets = [0, 0],
   bottomPhase = 0,
+  miteredEdges = false,
 }) {
   const [bottomStartInset, bottomEndInset] = bottomJointInsets;
   const corners = [
@@ -400,6 +408,7 @@ function fingeredPanel({
     thickness: jointDepth,
     profile: routedOutline.outline,
     diagnostic_profile: squareOutline,
+    mitered_edges: miteredEdges,
     operations,
     layout_origin: [x, y],
     entities,
@@ -504,13 +513,20 @@ export function buildLayout(values) {
   const hasBottom = spec.bottom_type !== "none";
   const capturedBottom = spec.bottom_type === "captured";
   const fingerJointedBottom = spec.bottom_type === "finger_jointed";
+  const fingerWalls = spec.wall_connection === "finger";
+  const miteredWalls = spec.wall_connection === "miter";
   const clearance = capturedBottom ? spec.bottom_slot_extra : 0;
   const slotHeight = capturedBottom ? spec.bottom_thickness + clearance : 0;
   const slotY = capturedBottom ? spec.bottom_slot_offset : 0;
   const pocketDepth = capturedBottom ? roundTo(spec.bottom_slot_depth + clearance, 12) : 0;
   const slotExtension = pocketDepth;
   const engagement = capturedBottom ? spec.bottom_slot_depth : 0;
-  const frontWidth = spec.width - 2 * wall;
+  const fullWidthFronts = miteredWalls || spec.wall_connection === "butt_sides";
+  const insetSides = spec.wall_connection === "butt_sides";
+  const frontWidth = fullWidthFronts ? spec.width : spec.width - 2 * wall;
+  const sideWidth = insetSides ? spec.depth - 2 * wall : spec.depth;
+  const frontOriginX = fullWidthFronts ? 0 : wall;
+  const sideOriginY = insetSides ? wall : 0;
   const gap = Math.max(18, wall * 3);
   const margin = 20;
   const wallBaseZ = spec.bottom_type === "butt_bottom" ? spec.bottom_thickness : 0;
@@ -528,53 +544,65 @@ export function buildLayout(values) {
     bottomMode: fingerJointedBottom ? "slot" : "plain",
     bottomJointDepth: spec.bottom_thickness,
     bottomPhase: fingerJointedBottom ? 1 : 0,
+    miteredEdges: miteredWalls,
   };
+  const capturedGroove = (origin, axisLength) => capturedBottom
+    ? [wall - slotExtension - origin, slotY, axisLength - 2 * wall + 2 * slotExtension, slotHeight]
+    : null;
+  const frontBottomInsets = fingerJointedBottom
+    ? [wall - frontOriginX, frontOriginX + frontWidth - (spec.width - wall)]
+    : [0, 0];
+  const sideBottomInsets = fingerJointedBottom
+    ? [wall - sideOriginY, sideOriginY + sideWidth - (spec.depth - wall)]
+    : [0, 0];
   const placements = [
     fingeredPanel({
       ...common,
       x: margin,
       y: margin,
       width: frontWidth,
-      verticalMode: "tab",
+      verticalMode: fingerWalls ? "tab" : "plain",
       label: "FRONT",
-      groove: capturedBottom ? [-slotExtension, slotY, frontWidth + 2 * slotExtension, slotHeight] : null,
+      groove: capturedGroove(frontOriginX, spec.width),
+      bottomJointInsets: frontBottomInsets,
     }),
     fingeredPanel({
       ...common,
       x: margin,
       y: margin + wallHeight + gap,
       width: frontWidth,
-      verticalMode: "tab",
+      verticalMode: fingerWalls ? "tab" : "plain",
       label: "BACK",
-      groove: capturedBottom ? [-slotExtension, slotY, frontWidth + 2 * slotExtension, slotHeight] : null,
+      groove: capturedGroove(frontOriginX, spec.width),
+      bottomJointInsets: frontBottomInsets,
     }),
     fingeredPanel({
       ...common,
       x: margin + spec.width + wall + gap,
       y: margin,
-      width: spec.depth,
-      verticalMode: "slot",
+      width: sideWidth,
+      verticalMode: fingerWalls ? "slot" : "plain",
       label: "LEFT SIDE",
-      groove: capturedBottom ? [wall - slotExtension, slotY, spec.depth - 2 * wall + 2 * slotExtension, slotHeight] : null,
-      bottomJointInsets: fingerJointedBottom ? [wall, wall] : [0, 0],
+      groove: capturedGroove(sideOriginY, spec.depth),
+      bottomJointInsets: sideBottomInsets,
     }),
     fingeredPanel({
       ...common,
       x: margin + spec.width + wall + gap,
       y: margin + wallHeight + gap,
-      width: spec.depth,
-      verticalMode: "slot",
+      width: sideWidth,
+      verticalMode: fingerWalls ? "slot" : "plain",
       label: "RIGHT SIDE",
-      groove: capturedBottom ? [wall - slotExtension, slotY, spec.depth - 2 * wall + 2 * slotExtension, slotHeight] : null,
-      bottomJointInsets: fingerJointedBottom ? [wall, wall] : [0, 0],
+      groove: capturedGroove(sideOriginY, spec.depth),
+      bottomJointInsets: sideBottomInsets,
     }),
   ];
 
   const assemblyTransforms = [
-    { origin: [wall, 0, wallBaseZ], u_axis: [1, 0, 0], v_axis: [0, 0, 1], thickness_axis: [0, 1, 0], explode_axis: [0, -1, 0] },
-    { origin: [wall, spec.depth, wallBaseZ], u_axis: [1, 0, 0], v_axis: [0, 0, 1], thickness_axis: [0, -1, 0], explode_axis: [0, 1, 0] },
-    { origin: [0, 0, wallBaseZ], u_axis: [0, 1, 0], v_axis: [0, 0, 1], thickness_axis: [1, 0, 0], explode_axis: [-1, 0, 0] },
-    { origin: [spec.width, 0, wallBaseZ], u_axis: [0, 1, 0], v_axis: [0, 0, 1], thickness_axis: [-1, 0, 0], explode_axis: [1, 0, 0] },
+    { origin: [frontOriginX, 0, wallBaseZ], u_axis: [1, 0, 0], v_axis: [0, 0, 1], thickness_axis: [0, 1, 0], explode_axis: [0, -1, 0] },
+    { origin: [frontOriginX, spec.depth, wallBaseZ], u_axis: [1, 0, 0], v_axis: [0, 0, 1], thickness_axis: [0, -1, 0], explode_axis: [0, 1, 0] },
+    { origin: [0, sideOriginY, wallBaseZ], u_axis: [0, 1, 0], v_axis: [0, 0, 1], thickness_axis: [1, 0, 0], explode_axis: [-1, 0, 0] },
+    { origin: [spec.width, sideOriginY, wallBaseZ], u_axis: [0, 1, 0], v_axis: [0, 0, 1], thickness_axis: [-1, 0, 0], explode_axis: [1, 0, 0] },
   ];
   placements.forEach((part, index) => { part.assembly = assemblyTransforms[index]; });
 
@@ -656,6 +684,7 @@ export function buildLayout(values) {
     bounds: entityBounds(entities),
     manufacturing: {
       bottom_type: spec.bottom_type,
+      wall_connection: spec.wall_connection,
       has_bottom_groove: capturedBottom,
       dogbones_enabled: spec.use_dogbones,
       dogbone_diameter: roundTo(spec.cutter_diameter, 3),

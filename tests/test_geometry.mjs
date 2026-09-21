@@ -118,6 +118,7 @@ test("missing optional values retain the established inch-derived defaults", () 
   assert.equal(spec.cutter_diameter, 3.175);
   assert.equal(spec.use_dogbones, true);
   assert.equal(spec.bottom_type, "captured");
+  assert.equal(spec.wall_connection, "finger");
 });
 
 test("invalid slot placement and depth are rejected", () => {
@@ -147,6 +148,7 @@ test("DXF declares units, CAM layers, bulges, and saved settings", () => {
   assert.ok(dxf.includes("999\nbottom_slot_offset_mm=12"));
   assert.ok(dxf.includes("999\nuse_dogbones=true"));
   assert.ok(dxf.includes("999\nbottom_type=captured"));
+  assert.ok(dxf.includes("999\nwall_connection=finger"));
   assert.ok(dxf.endsWith("0\nEOF\n"));
 });
 
@@ -255,6 +257,29 @@ test("no-bottom construction emits only four full-height walls", () => {
   assert.ok(layoutToDxf(layout).includes("999\nbottom_type=none"));
 });
 
+test("mitered wall connections use full-length plain wall blanks", () => {
+  const layout = buildLayout({ ...DEFAULT, bottom_type: "none", wall_connection: "miter" });
+  assert.deepEqual(layout.parts.map((part) => part.width), [450, 450, 400, 400]);
+  assert.ok(layout.parts.every((part) => part.mitered_edges));
+  assert.ok(layout.parts.every((part) => part.profile.length === 4));
+  assert.ok(layoutToDxf(layout).includes("999\nwall_connection=miter"));
+});
+
+test("butted wall variants expose end grain on the selected pair", () => {
+  const frontBack = buildLayout({ ...DEFAULT, bottom_type: "none", wall_connection: "butt_front_back" });
+  assert.deepEqual(frontBack.parts.map((part) => part.width), [426, 426, 400, 400]);
+  assert.deepEqual(frontBack.parts.map((part) => part.assembly.origin.slice(0, 2)), [
+    [12, 0], [12, 400], [0, 0], [450, 0],
+  ]);
+
+  const sides = buildLayout({ ...DEFAULT, bottom_type: "none", wall_connection: "butt_sides" });
+  assert.deepEqual(sides.parts.map((part) => part.width), [450, 450, 376, 376]);
+  assert.deepEqual(sides.parts.map((part) => part.assembly.origin.slice(0, 2)), [
+    [0, 0], [0, 400], [0, 12], [450, 12],
+  ]);
+  assert.ok([...frontBack.parts, ...sides.parts].every((part) => part.profile.length === 4));
+});
+
 test("butt-inside fits between the walls without changing outside dimensions", () => {
   const layout = buildLayout({ ...DEFAULT, bottom_type: "butt_inside" });
   const bottom = layout.parts.at(-1);
@@ -296,6 +321,7 @@ test("captured-only slot constraints do not block other bottom types", () => {
     bottom_slot_offset: 1000,
   }));
   assert.throws(() => buildLayout({ ...DEFAULT, bottom_type: "unsupported" }), /bottom type/);
+  assert.throws(() => buildLayout({ ...DEFAULT, wall_connection: "unsupported" }), /wall connection/);
 });
 
 test("every bottom construction remains inside its assembled dimensions", () => {

@@ -21,6 +21,20 @@
         </div>
 
         <form id="drawerForm" autocomplete="off">
+          <fieldset class="wall-connection-fieldset">
+            <legend>Wall connection</legend>
+            <label class="select-row" for="wall_connection">
+              <span>Corner joint</span>
+              <select id="wall_connection" name="wall_connection">
+                <option value="finger" selected>Finger joints</option>
+                <option value="miter">Mitered edges</option>
+                <option value="butt_front_back">Butted · front/back</option>
+                <option value="butt_sides">Butted · side/side</option>
+              </select>
+            </label>
+            <p id="wallConnectionHelp" class="control-help">Interlocking finger joints at all four vertical corners.</p>
+          </fieldset>
+
           <fieldset class="bottom-type-fieldset">
             <legend>Bottom type</legend>
             <label class="select-row" for="bottom_type">
@@ -36,7 +50,7 @@
             <p id="bottomTypeHelp" class="control-help">Rides in grooves routed into all four walls.</p>
           </fieldset>
 
-          <label class="dogbone-toggle" for="use_dogbones">
+          <label class="dogbone-toggle" id="dogboneToggle" for="use_dogbones">
             <input id="use_dogbones" name="use_dogbones" type="checkbox" checked />
             <span>
               <strong>Use dogbones</strong>
@@ -72,13 +86,13 @@
             </div>
           </fieldset>
 
-          <fieldset>
+          <fieldset id="joinerySettings">
             <legend>Joinery</legend>
-            <div class="field-row">
+            <div class="field-row finger-joint-setting">
               <label for="finger_size">Finger size <span>F</span></label>
               <div class="input-wrap"><input id="finger_size" name="finger_size" type="number" value="0.5" min="0.11811" max="3.93701" step="0.01" /><em>in</em></div>
             </div>
-            <div class="field-row">
+            <div class="field-row finger-joint-setting">
               <label for="finger_clearance">Finger clearance <span>G</span></label>
               <div class="input-wrap"><input id="finger_clearance" name="finger_clearance" type="number" value="0.01" min="0" max="0.3937" step="0.001" /><em>in</em></div>
             </div>
@@ -94,7 +108,7 @@
               <label for="bottom_slot_offset">Bottom slot offset <span>O</span></label>
               <div class="input-wrap"><input id="bottom_slot_offset" name="bottom_slot_offset" type="number" value="0.5" min="0" max="39.37008" step="0.001" /><em>in</em></div>
             </div>
-            <div class="field-row">
+            <div class="field-row finger-joint-setting">
               <label for="cutter_diameter">Cutter diameter <span>Ø</span></label>
               <div class="input-wrap"><input id="cutter_diameter" name="cutter_diameter" type="number" value="0.125" min="0.00394" max="1.9685" step="0.001" /><em>in</em></div>
             </div>

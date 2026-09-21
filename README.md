@@ -41,7 +41,9 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
   settings from DXF** to restore the saved dimensions, materials, joinery, cutter,
   and unit selection. DXFs made before this feature remain valid but have no
   settings to restore.
-- `CUT_OUTSIDE` contains the five part profiles.
+- `CUT_OUTSIDE` contains the four wall profiles and the bottom profile when one is selected.
+- Wall corners can use finger joints, 45-degree miters, or either orientation of
+  a butt joint, allowing the exposed end grain to face front/back or side/side.
 - Five bottom constructions are available: none, captured, full-footprint
   butt-bottom, wall-inset butt-inside, and finger jointed. Butt-bottom shortens
   the walls by the bottom material thickness so every mode preserves the entered

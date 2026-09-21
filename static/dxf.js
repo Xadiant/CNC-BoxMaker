@@ -43,6 +43,7 @@ export function layoutToDxf(layout, units = "mm") {
   }
   metadata.push(pair(999, `use_dogbones=${storedSpec.use_dogbones !== false}`));
   metadata.push(pair(999, `bottom_type=${storedSpec.bottom_type ?? "captured"}`));
+  metadata.push(pair(999, `wall_connection=${storedSpec.wall_connection ?? "finger"}`));
 
   const chunks = [
     pair(0, "SECTION"), pair(2, "HEADER"), pair(9, "$ACADVER"), pair(1, "AC1024"),
