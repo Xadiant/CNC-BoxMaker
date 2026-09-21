@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101311" />
+    <title>CNC drawer generator</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="workspace">
+      <section class="panel controls-panel" aria-labelledby="controlsTitle">
+        <div class="unit-toggle" role="group" aria-label="Measurement units">
+          <button type="button" data-unit="mm" aria-pressed="false">MM</button>
+          <button type="button" data-unit="in" aria-pressed="true">IN</button>
+        </div>
+        <div class="panel-heading">
+          <span class="eyebrow">01 · Configure</span>
+          <h1 id="controlsTitle">Drawer dimensions</h1>
+          <p>Outside dimensions for an open-top, side-mounted drawer.</p>
+        </div>
+
+        <form id="drawerForm" autocomplete="off">
+          <fieldset>
+            <legend>Overall size</legend>
+            <div class="field-row">
+              <label for="width">Width <span>W</span></label>
+              <div class="input-wrap"><input id="width" name="width" type="number" value="17.71654" min="1.9685" max="59.05512" step="0.01" /><em>in</em></div>
+            </div>
+            <div class="field-row">
+              <label for="depth">Depth <span>D</span></label>
+              <div class="input-wrap"><input id="depth" name="depth" type="number" value="15.74803" min="1.9685" max="59.05512" step="0.01" /><em>in</em></div>
+            </div>
+            <div class="field-row">
+              <label for="height">Height <span>H</span></label>
+              <div class="input-wrap"><input id="height" name="height" type="number" value="6.29921" min="0.98425" max="39.37008" step="0.01" /><em>in</em></div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Material Thickness</legend>
+            <div class="field-row">
+              <label for="wall_thickness">Wall material <span>T</span></label>
+              <div class="input-wrap"><input id="wall_thickness" name="wall_thickness" type="number" value="0.5" min="0.11811" max="1.9685" step="0.001" /><em>in</em></div>
+            </div>
+            <div class="field-row">
+              <label for="bottom_thickness">Bottom material <span>B</span></label>
+              <div class="input-wrap"><input id="bottom_thickness" name="bottom_thickness" type="number" value="0.25" min="0.03937" max="1.1811" step="0.001" /><em>in</em></div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Joinery</legend>
+            <div class="field-row">
+              <label for="finger_size">Finger size <span>F</span></label>
+              <div class="input-wrap"><input id="finger_size" name="finger_size" type="number" value="0.5" min="0.11811" max="3.93701" step="0.01" /><em>in</em></div>
+            </div>
+            <div class="field-row">
+              <label for="finger_clearance">Finger clearance <span>G</span></label>
+              <div class="input-wrap"><input id="finger_clearance" name="finger_clearance" type="number" value="0.01" min="0" max="0.3937" step="0.001" /><em>in</em></div>
+            </div>
+            <div class="field-row">
+              <label for="bottom_slot_extra">Bottom slot extra <span>C</span></label>
+              <div class="input-wrap"><input id="bottom_slot_extra" name="bottom_slot_extra" type="number" value="0.02125" min="0" max="0.3937" step="0.00001" /><em>in</em></div>
+            </div>
+            <div class="field-row">
+              <label for="bottom_slot_depth">Bottom slot depth <span>P</span></label>
+              <div class="input-wrap"><input id="bottom_slot_depth" name="bottom_slot_depth" type="number" value="0.25" min="0.00394" max="1.9685" step="0.001" /><em>in</em></div>
+            </div>
+            <div class="field-row">
+              <label for="bottom_slot_offset">Bottom slot offset <span>O</span></label>
+              <div class="input-wrap"><input id="bottom_slot_offset" name="bottom_slot_offset" type="number" value="0.5" min="0" max="39.37008" step="0.001" /><em>in</em></div>
+            </div>
+            <div class="field-row">
+              <label for="cutter_diameter">Cutter diameter <span>Ø</span></label>
+              <div class="input-wrap"><input id="cutter_diameter" name="cutter_diameter" type="number" value="0.125" min="0.00394" max="1.9685" step="0.001" /><em>in</em></div>
+            </div>
+          </fieldset>
+        </form>
+
+        <div class="cut-summary">
+          <div><span>Parts</span><strong>5</strong></div>
+          <div><span>Bottom pocket depth</span><strong id="pocketDepth">0.271 in</strong></div>
+          <div><span>Dogbone Ø</span><strong id="dogboneSize">0.125 in</strong></div>
+        </div>
+
+        <div id="errorMessage" class="error-message" role="alert" hidden></div>
+
+        <button id="downloadButton" class="download-button" type="button">
+          <span>Download DXF</span>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v10m0 0 4-4m-4 4L6 8M3 15v2h14v-2"/></svg>
+        </button>
+        <button id="importSettingsButton" class="import-button" type="button">Load settings from DXF</button>
+        <input id="dxfSettingsFile" type="file" accept=".dxf,application/dxf" hidden />
+        <p class="fine-print">Exports include these settings for later reload. Finger clearance is added to each socket's total width and depth, split evenly between its two side faces; it also shifts dogbones back toward the corner at 45°. Slot offset is measured from the panel bottom to the lower edge of the groove. Extra is added to the requested slot depth and width to calculate the routed pocket.</p>
+
+        <fieldset class="piece-drawing">
+          <legend>Pieces to draw <span id="pieceDrawingCount">5 of 5</span></legend>
+          <div class="piece-options">
+            <label><input type="checkbox" data-draw-piece="FRONT" checked /><span>Front</span></label>
+            <label><input type="checkbox" data-draw-piece="BACK" checked /><span>Back</span></label>
+            <label><input type="checkbox" data-draw-piece="LEFT SIDE" checked /><span>Left side</span></label>
+            <label><input type="checkbox" data-draw-piece="RIGHT SIDE" checked /><span>Right side</span></label>
+            <label><input type="checkbox" data-draw-piece="CAPTURED BOTTOM" checked /><span>Captured bottom</span></label>
+          </div>
+        </fieldset>
+      </section>
+
+      <section class="panel viewport-panel" aria-labelledby="modelTitle">
+        <div class="viewer-header">
+          <div><span class="eyebrow">02 · Inspect</span><h2 id="modelTitle">Assembled model</h2></div>
+          <div class="view-actions">
+            <label class="draw-mode" for="modelMode">
+              <span>Draw</span>
+              <select id="modelMode">
+                <option value="assembly">Assembly</option>
+                <option value="overlaps">Overlaps</option>
+                <option value="empty">Empty space</option>
+              </select>
+            </label>
+            <button id="reset3d" type="button" title="Reset 3D view">Reset view</button>
+          </div>
+        </div>
+        <div class="canvas-stage" id="modelStage">
+          <canvas id="modelCanvas" aria-label="Interactive 3D drawer preview"></canvas>
+          <div class="axis-key" aria-hidden="true"><i class="axis-x"></i>X <i class="axis-y"></i>Y <i class="axis-z"></i>Z</div>
+          <div class="explode-control" id="explodeControl">
+            <label for="explodeSlider">Exploded view <output id="explodeValue" for="explodeSlider">0%</output></label>
+            <input id="explodeSlider" type="range" min="0" max="100" value="0" step="1" />
+          </div>
+          <div class="diagnostic-status" id="diagnosticStatus" hidden></div>
+          <div class="interaction-hint"><span>Drag</span> orbit <span>Right / Shift + drag</span> pan <span>Scroll</span> zoom</div>
+          <div class="dimension-card" id="dimensionCard">450 × 400 × 160 mm</div>
+        </div>
+        <div class="viewer-footer" id="modelLegend">
+          <div class="assembly-legend-item"><span class="swatch wall"></span>Wall material</div>
+          <div class="assembly-legend-item"><span class="swatch bottom"></span>Captured bottom</div>
+          <div class="assembly-legend-item"><span class="swatch groove"></span>Bottom groove</div>
+          <div class="overlap-legend-item"><span class="swatch overlap"></span>Physical overlap</div>
+          <div class="empty-legend-item"><span class="swatch empty"></span>Unexpected empty space</div>
+        </div>
+      </section>
+
+      <section class="panel drawing-panel" aria-labelledby="drawingTitle">
+        <div class="viewer-header">
+          <div><span class="eyebrow">03 · Manufacture</span><h2 id="drawingTitle">DXF cut layout</h2></div>
+          <div class="zoom-readout" id="zoomReadout">FIT</div>
+        </div>
+        <div class="canvas-stage drawing-stage" id="drawingStage">
+          <canvas id="drawingCanvas" aria-label="DXF drawing preview"></canvas>
+          <div class="drawing-tools">
+            <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
+            <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
+            <button id="fitDrawing" type="button" aria-label="Fit drawing">⌗</button>
+          </div>
+          <div class="interaction-hint"><span>Drag</span> pan <span>Scroll</span> zoom</div>
+        </div>
+        <div class="viewer-footer layer-legend">
+          <div><span class="line-swatch cut"></span>Cut</div>
+          <div><span class="line-swatch pocket"></span>Pocket</div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
