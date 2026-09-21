@@ -1,8 +1,9 @@
 import { buildLayout } from "./geometry.js";
 import { layoutToDxf } from "./dxf.js";
+import { evaluateArithmetic } from "./arithmetic.js";
 
 const form = document.querySelector("#boxForm");
-const inputs = [...form.querySelectorAll('input[type="number"]')];
+const inputs = [...form.querySelectorAll("input[data-expression-input]")];
 const dogboneCheckbox = document.querySelector("#use_dogbones");
 const dimensionBasisSelect = document.querySelector("#dimension_basis");
 const wallConnectionSelect = document.querySelector("#wall_connection");
@@ -134,8 +135,16 @@ const drawingView = { scale: 1, panX: 0, panY: 0, fittedScale: 1 };
 
 function readSpec() {
   const factor = displayUnit === "in" ? 25.4 : 1;
+  const values = Object.fromEntries(inputs.map((input) => {
+    try {
+      return [input.name, evaluateArithmetic(input.value) * factor];
+    } catch (error) {
+      const label = input.labels?.[0]?.textContent.trim() || input.name.replaceAll("_", " ");
+      throw new Error(`${label}: ${error.message}`);
+    }
+  }));
   return {
-    ...Object.fromEntries(inputs.map((input) => [input.name, Number(input.value) * factor])),
+    ...values,
     use_dogbones: dogboneCheckbox.checked,
     dimension_basis: dimensionBasisSelect.value,
     wall_connection: wallConnectionSelect.value,
@@ -231,9 +240,15 @@ function visibleParts() {
 
 function setUnit(nextUnit) {
   if (nextUnit === displayUnit) return;
-  const millimetreValues = readSpec();
-  showMillimetreValues(millimetreValues, nextUnit);
-  scheduleUpdate();
+  try {
+    const millimetreValues = readSpec();
+    showMillimetreValues(millimetreValues, nextUnit);
+    scheduleUpdate();
+  } catch (error) {
+    errorMessage.textContent = error.message;
+    errorMessage.hidden = false;
+    setStatus("Check dimensions", "error");
+  }
 }
 
 function showMillimetreValues(millimetreValues, nextUnit) {
@@ -322,6 +337,15 @@ function formatInput(value) {
   return Number(value.toFixed(displayUnit === "in" ? 5 : 3)).toString();
 }
 
+function commitInputExpression(input) {
+  try {
+    input.value = formatInput(evaluateArithmetic(input.value));
+  } catch {
+    // Keep invalid text in place so it can be corrected; updateGeometry shows the error.
+  }
+  scheduleUpdate();
+}
+
 function measure(valueMm) {
   const value = displayUnit === "in" ? valueMm / 25.4 : valueMm;
   const maximumFractionDigits = displayUnit === "in" ? 4 : 3;
@@ -355,8 +379,8 @@ function scheduleUpdate() {
 
 async function updateGeometry(successMessage = "Geometry ready") {
   const sequence = ++requestSequence;
-  spec = readSpec();
   try {
+    spec = readSpec();
     const result = buildLayout(spec);
     preparePartMeshes(result.parts);
     if (sequence !== requestSequence) return;
@@ -1714,7 +1738,15 @@ dxfSettingsFile.addEventListener("change", async () => {
   }
 });
 
-inputs.forEach((input) => input.addEventListener("input", scheduleUpdate));
+inputs.forEach((input) => {
+  input.addEventListener("input", scheduleUpdate);
+  input.addEventListener("blur", () => commitInputExpression(input));
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.isComposing) return;
+    event.preventDefault();
+    commitInputExpression(input);
+  });
+});
 dogboneCheckbox.addEventListener("change", scheduleUpdate);
 dimensionBasisSelect.addEventListener("change", () => {
   updateDimensionBasisControls();

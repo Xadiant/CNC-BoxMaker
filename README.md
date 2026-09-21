@@ -17,7 +17,8 @@ python app.py
 
 Then open <http://127.0.0.1:8000>. Inputs default to inches; use the **MM / IN**
 switch in the header to change units. The downloaded DXF uses the selected unit
-system too.
+system too. Dimension and setting fields accept arithmetic expressions such as
+`1/32`, `0.1 + .2`, and `(3/4) * 2`.
 
 The dimension-reference dropdown accepts either exterior extents or clear
 interior dimensions. Interior width and depth are measured between the inside
@@ -32,7 +33,7 @@ be deployed to any static web host without Python.
 With Node.js 20 or newer installed:
 
 ```powershell
-node --test tests/test_geometry.mjs
+node --test tests/*.mjs
 ```
 
 The tests cover browser-side geometry, validation, dogbone construction, unit

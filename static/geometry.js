@@ -473,6 +473,12 @@ function dogbonePocketOutline(points, reliefIndices, radius, offset = 0, maximum
   }
   if (offset >= radius) throw new Error("joint clearance must be smaller than the cutter radius");
 
+  const twiceArea = points.reduce((sum, current, index) => {
+    const following = points[(index + 1) % points.length];
+    return sum + current[0] * following[1] - following[0] * current[1];
+  }, 0);
+  const winding = twiceArea > 0 ? 1 : -1;
+
   const reliefs = new Map();
   for (const index of reliefIndices) {
     const current = points[index];
@@ -560,9 +566,11 @@ function dogbonePocketOutline(points, reliefIndices, radius, offset = 0, maximum
     appendPoint(start);
     const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0]);
     const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0]);
-    let sweep = positiveModulo(endAngle - startAngle, Math.PI * 2);
-    if (sweep <= 1e-9) sweep = Math.PI * 2;
-    const segmentCount = Math.max(1, Math.ceil(sweep / maximumArcStep - 1e-12));
+    let sweep = winding > 0
+      ? positiveModulo(endAngle - startAngle, Math.PI * 2)
+      : -positiveModulo(startAngle - endAngle, Math.PI * 2);
+    if (Math.abs(sweep) <= 1e-9) sweep = winding * Math.PI * 2;
+    const segmentCount = Math.max(1, Math.ceil(Math.abs(sweep) / maximumArcStep - 1e-12));
     const segmentSweep = sweep / segmentCount;
     const segmentBulge = Math.tan(segmentSweep / 4);
     for (let step = 1; step <= segmentCount; step += 1) {
@@ -878,6 +886,10 @@ function panelPart({
         bulges: group.outline.map(() => 0),
         operations: [],
       };
+    operations.push(...routedPocket.operations.map((operation) => ({
+      ...operation,
+      depth: hiddenPocketDepth,
+    })));
     return {
       type: "polyline",
       layer: hiddenPocketLayer,

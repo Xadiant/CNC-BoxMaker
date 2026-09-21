@@ -722,6 +722,45 @@ test("hidden top and bottom panel skins retain alternating full-thickness tabs",
   assert.equal(layout.manufacturing.hidden_top_pocket_depth, 8 - skin);
 });
 
+test("hidden top and bottom dogbones follow pocket winding and reach the 3D mesh", () => {
+  const skin = 2;
+  const layout = buildLayout({
+    ...DEFAULT,
+    bottom_type: "hidden_finger_jointed",
+    top_type: "hidden_finger_jointed",
+    top_thickness: 8,
+    hidden_finger_skin: skin,
+  });
+  const [bottom, top] = layout.parts.slice(-2);
+
+  for (const [part, expectedDepth] of [
+    [bottom, DEFAULT.bottom_thickness - skin],
+    [top, 8 - skin],
+  ]) {
+    const reliefs = part.operations.filter((operation) => operation.type === "hidden_finger_relief");
+    assert.ok(reliefs.length > 0);
+    assert.ok(reliefs.every((operation) => operation.depth === expectedDepth));
+  }
+
+  for (const layer of ["POCKET_HIDDEN_BOTTOM", "POCKET_HIDDEN_TOP"]) {
+    const pocketPaths = layout.entities.filter((entity) => entity.layer === layer);
+    assert.equal(pocketPaths.length, 4);
+    const bulgeCounts = [];
+    for (const path of pocketPaths) {
+      const twiceArea = path.points.reduce((sum, current, index) => {
+        const following = path.points[(index + 1) % path.points.length];
+        return sum + current[0] * following[1] - following[0] * current[1];
+      }, 0);
+      const arcBulges = path.bulges.filter((bulge) => Math.abs(bulge) > 1e-12);
+      assert.ok(arcBulges.length > 0);
+      assert.ok(arcBulges.every((bulge) => Math.sign(bulge) === Math.sign(twiceArea)));
+      bulgeCounts.push(arcBulges.length);
+    }
+    assert.equal(bulgeCounts[0], bulgeCounts[1]);
+    assert.equal(bulgeCounts[2], bulgeCounts[3]);
+  }
+});
+
 test("hidden-finger pocket depth and skin are saved on a dedicated DXF layer", () => {
   const layout = buildLayout({ ...DEFAULT, wall_connection: "hidden_finger", hidden_finger_skin: 2 });
   const dxf = layoutToDxf(layout);
