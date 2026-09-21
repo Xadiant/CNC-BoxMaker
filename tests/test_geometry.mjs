@@ -128,9 +128,15 @@ test("missing optional values retain the established inch-derived defaults", () 
   assert.equal(spec.bottom_slot_depth, 6.35);
   assert.equal(spec.bottom_slot_offset, 12.7);
   assert.equal(spec.bottom_inset_depth, 3.175);
+  assert.equal(spec.top_thickness, 6.35);
+  assert.equal(spec.top_slot_extra, 0.53975);
+  assert.equal(spec.top_slot_depth, 6.35);
+  assert.equal(spec.top_slot_offset, 12.7);
+  assert.equal(spec.top_inset_depth, 3.175);
   assert.equal(spec.cutter_diameter, 3.175);
   assert.equal(spec.use_dogbones, true);
   assert.equal(spec.bottom_type, "captured");
+  assert.equal(spec.top_type, "none");
   assert.equal(spec.wall_connection, "finger");
   assert.equal(spec.dimension_basis, "exterior");
   assert.equal(validateSpec({ ...DEFAULT, finger_clearance: 0.4 }).joint_clearance, 0.4);
@@ -184,6 +190,30 @@ test("exterior dimensions report the resulting clear interior size", () => {
   }
 });
 
+test("top constructions mirror bottom contributions to clear interior height", () => {
+  const topDepths = {
+    none: 0,
+    captured: 12 + 0.53975 / 2 + 6.35,
+    inset: 6.35,
+    butt_top: 6.35,
+    butt_inside: 6.35,
+    finger_jointed: 6.35,
+    hidden_finger_jointed: 6.35,
+  };
+  for (const [topType, topDepth] of Object.entries(topDepths)) {
+    const exterior = buildLayout({ ...DEFAULT, bottom_type: "none", top_type: topType });
+    close(exterior.interior_dimensions.height, DEFAULT.height - topDepth);
+    const interior = buildLayout({
+      ...DEFAULT,
+      bottom_type: "none",
+      top_type: topType,
+      dimension_basis: "interior",
+    });
+    close(interior.assembled_dimensions.height, DEFAULT.height + topDepth);
+    close(interior.interior_dimensions.height, DEFAULT.height);
+  }
+});
+
 test("interior dimension reference is validated and saved in DXF metadata", () => {
   const layout = buildLayout({ ...DEFAULT, dimension_basis: "interior" });
   assert.equal(layout.spec.width, DEFAULT.width);
@@ -224,6 +254,7 @@ test("DXF declares units, CAM layers, bulges, and saved settings", () => {
   assert.ok(dxf.includes("999\nbottom_slot_offset_mm=12"));
   assert.ok(dxf.includes("999\nuse_dogbones=true"));
   assert.ok(dxf.includes("999\nbottom_type=captured"));
+  assert.ok(dxf.includes("999\ntop_type=none"));
   assert.ok(dxf.includes("999\nwall_connection=finger"));
   assert.ok(dxf.endsWith("0\nEOF\n"));
 });
@@ -403,6 +434,84 @@ test("inset bottom has an exterior-size flange and a clearance-expanded perimete
   assert.match(dxf, /2\nPOCKET_BOTTOM_INSET_2\.000MM\n/);
   assert.ok(dxf.includes("999\njoint_clearance_mm=0.4"));
   assert.ok(dxf.includes("999\nbottom_type=inset"));
+});
+
+test("captured top mirrors captured-bottom grooves and assembly placement", () => {
+  const layout = buildLayout({
+    ...DEFAULT,
+    bottom_type: "none",
+    top_type: "captured",
+    top_thickness: 5,
+    top_slot_extra: 0.6,
+    top_slot_depth: 7,
+    top_slot_offset: 9,
+  });
+  const top = layout.parts.at(-1);
+  assert.equal(top.name, "TOP");
+  assert.deepEqual(top.assembly.origin, [5, 5, 150.7]);
+  assert.deepEqual(top.assembly.thickness_axis, [0, 0, -1]);
+  assert.equal(layout.manufacturing.top_width, 440);
+  assert.equal(layout.manufacturing.top_depth, 390);
+  assert.equal(layout.manufacturing.top_pocket_depth, 7.6);
+  assert.equal(layout.manufacturing.top_groove_width, 5.6);
+  const grooves = layout.parts.slice(0, 4)
+    .map((part) => part.operations.find((operation) => operation.type === "groove"));
+  assert.ok(grooves.every((operation) => operation.depth === 7.6));
+  assert.ok(grooves.every((operation) => operation.rect[1] === 145.4));
+  assert.equal(layout.entities.filter((entity) => entity.layer === "POCKET_TOP_SLOT").length, 4);
+  const dxf = layoutToDxf(layout);
+  assert.match(dxf, /2\nPOCKET_TOP_SLOT_7\.600MM\n/);
+  assert.ok(dxf.includes("999\ntop_type=captured"));
+});
+
+test("inset top has an exterior-size flange and an underside perimeter pocket", () => {
+  const layout = buildLayout({
+    ...DEFAULT,
+    bottom_type: "none",
+    top_type: "inset",
+    top_thickness: 6,
+    top_inset_depth: 2,
+    joint_clearance: 0.4,
+  });
+  const top = layout.parts.at(-1);
+  const pockets = top.operations.filter((operation) => operation.type === "inset_pocket");
+  assert.deepEqual(top.assembly.origin, [0, 0, DEFAULT.height]);
+  assert.deepEqual(top.assembly.thickness_axis, [0, 0, -1]);
+  assert.equal(layout.manufacturing.top_width, DEFAULT.width);
+  assert.equal(layout.manufacturing.top_depth, DEFAULT.depth);
+  assert.ok(layout.parts.slice(0, 4).every((part) => part.height === 156));
+  assert.equal(pockets.length, 4);
+  assert.deepEqual(pockets[0].rect, [0, 0, DEFAULT.width, DEFAULT.wall_thickness + 0.4]);
+  assert.ok(pockets.every((operation) => operation.depth === 2));
+  assert.equal(layout.entities.filter((entity) => entity.layer === "POCKET_TOP_INSET").length, 4);
+  assert.match(layoutToDxf(layout), /2\nPOCKET_TOP_INSET_2\.000MM\n/);
+});
+
+test("top through and hidden fingers interlock with all four wall tops", () => {
+  for (const topType of ["finger_jointed", "hidden_finger_jointed"]) {
+    const layout = buildLayout({ ...DEFAULT, bottom_type: "none", top_type: topType });
+    const top = layout.parts.at(-1);
+    assert.equal(top.name, "TOP");
+    assert.deepEqual(top.assembly.origin, [12, 12, DEFAULT.height]);
+    assert.ok(top.profile.length > 4);
+    assert.ok(layout.parts.slice(0, 4).every((part) =>
+      new Set(part.profile.map(([, y]) => y)).size > 2
+    ));
+    if (topType === "hidden_finger_jointed") {
+      assert.ok(layout.parts.slice(0, 4).every((part) =>
+        part.operations.some((operation) => operation.type === "hidden_finger_pocket")
+      ));
+    }
+  }
+});
+
+test("butt-top spans the footprint and shortens walls from above", () => {
+  const layout = buildLayout({ ...DEFAULT, bottom_type: "none", top_type: "butt_top", top_thickness: 5 });
+  const top = layout.parts.at(-1);
+  assert.deepEqual(top.assembly.origin, [0, 0, DEFAULT.height]);
+  assert.equal(layout.manufacturing.top_width, DEFAULT.width);
+  assert.equal(layout.manufacturing.top_depth, DEFAULT.depth);
+  assert.ok(layout.parts.slice(0, 4).every((part) => part.height === 155));
 });
 
 test("finger-jointed bottom interlocks with all four wall bottoms", () => {
@@ -587,6 +696,7 @@ test("captured-only slot constraints do not block other bottom types", () => {
     bottom_slot_offset: 1000,
   }));
   assert.throws(() => buildLayout({ ...DEFAULT, bottom_type: "unsupported" }), /bottom type/);
+  assert.throws(() => buildLayout({ ...DEFAULT, top_type: "unsupported" }), /top type/);
   assert.throws(() => buildLayout({ ...DEFAULT, wall_connection: "unsupported" }), /wall connection/);
 });
 
@@ -607,6 +717,30 @@ test("every bottom construction remains inside its assembled dimensions", () => 
           point.forEach((coordinate, axis) => {
             assert.ok(coordinate >= -1e-8, `${bottomType} axis ${axis} fell below zero`);
             assert.ok(coordinate <= limits[axis] + 1e-8, `${bottomType} axis ${axis} exceeded its limit`);
+          });
+        }
+      }
+    }
+  }
+});
+
+test("every top construction remains inside its assembled dimensions", () => {
+  for (const topType of [
+    "none", "captured", "inset", "butt_top", "butt_inside", "finger_jointed", "hidden_finger_jointed",
+  ]) {
+    const layout = buildLayout({ ...DEFAULT, bottom_type: "none", top_type: topType });
+    const limits = Object.values(layout.assembled_dimensions);
+    for (const part of layout.parts) {
+      const transform = part.assembly;
+      for (const [u, v] of part.profile) {
+        for (const q of [0, part.thickness]) {
+          const point = [0, 1, 2].map((axis) => transform.origin[axis]
+            + transform.u_axis[axis] * u
+            + transform.v_axis[axis] * v
+            + transform.thickness_axis[axis] * q);
+          point.forEach((coordinate, axis) => {
+            assert.ok(coordinate >= -1e-8, `${topType} axis ${axis} fell below zero`);
+            assert.ok(coordinate <= limits[axis] + 1e-8, `${topType} axis ${axis} exceeded its limit`);
           });
         }
       }

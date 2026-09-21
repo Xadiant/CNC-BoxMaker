@@ -12,6 +12,11 @@ const DXF_SETTING_NAMES = [
   "bottom_slot_depth",
   "bottom_slot_offset",
   "bottom_inset_depth",
+  "top_thickness",
+  "top_slot_extra",
+  "top_slot_depth",
+  "top_slot_offset",
+  "top_inset_depth",
   "cutter_diameter",
 ];
 
@@ -33,25 +38,32 @@ export function layoutToDxf(layout, units = "mm") {
   if (units !== "mm" && units !== "in") throw new Error("units must be 'mm' or 'in'");
   const scale = units === "mm" ? 1 : 1 / 25.4;
   const insertionUnits = units === "mm" ? 4 : 1;
-  const pocketDepth = layout.manufacturing.pocket_depth * scale;
-  const pocketLayer = `POCKET_BOTTOM_SLOT_${pocketDepth.toFixed(3)}${units.toUpperCase()}`;
-  const insetPocketLayer = `POCKET_BOTTOM_INSET_${pocketDepth.toFixed(3)}${units.toUpperCase()}`;
+  const bottomPocketDepth = layout.manufacturing.bottom_pocket_depth * scale;
+  const bottomPocketLayer = `POCKET_BOTTOM_SLOT_${bottomPocketDepth.toFixed(3)}${units.toUpperCase()}`;
+  const bottomInsetPocketLayer = `POCKET_BOTTOM_INSET_${bottomPocketDepth.toFixed(3)}${units.toUpperCase()}`;
+  const topPocketDepth = layout.manufacturing.top_pocket_depth * scale;
+  const topPocketLayer = `POCKET_TOP_SLOT_${topPocketDepth.toFixed(3)}${units.toUpperCase()}`;
+  const topInsetPocketLayer = `POCKET_TOP_INSET_${topPocketDepth.toFixed(3)}${units.toUpperCase()}`;
   const hiddenPocketDepth = layout.manufacturing.hidden_finger_pocket_depth * scale;
   const hiddenPocketLayer = `POCKET_HIDDEN_FINGERS_${hiddenPocketDepth.toFixed(3)}${units.toUpperCase()}`;
   const outputLayer = (layer) => ({
-    POCKET_BOTTOM_SLOT: pocketLayer,
-    POCKET_BOTTOM_INSET: insetPocketLayer,
+    POCKET_BOTTOM_SLOT: bottomPocketLayer,
+    POCKET_BOTTOM_INSET: bottomInsetPocketLayer,
+    POCKET_TOP_SLOT: topPocketLayer,
+    POCKET_TOP_INSET: topInsetPocketLayer,
     POCKET_HIDDEN_FINGERS: hiddenPocketLayer,
   })[layer] ?? layer;
 
   const storedSpec = { ...layout.spec };
   if (storedSpec.bottom_slot_offset == null) storedSpec.bottom_slot_offset = storedSpec.wall_thickness;
+  if (storedSpec.top_slot_offset == null) storedSpec.top_slot_offset = storedSpec.wall_thickness;
   const metadata = [pair(999, DXF_SETTINGS_MARKER), pair(999, `units=${units}`)];
   for (const name of DXF_SETTING_NAMES) {
     metadata.push(pair(999, `${name}_mm=${significant(storedSpec[name])}`));
   }
   metadata.push(pair(999, `use_dogbones=${storedSpec.use_dogbones !== false}`));
   metadata.push(pair(999, `bottom_type=${storedSpec.bottom_type ?? "captured"}`));
+  metadata.push(pair(999, `top_type=${storedSpec.top_type ?? "none"}`));
   metadata.push(pair(999, `wall_connection=${storedSpec.wall_connection ?? "finger"}`));
   metadata.push(pair(999, `dimension_basis=${storedSpec.dimension_basis ?? "exterior"}`));
 
@@ -65,12 +77,14 @@ export function layoutToDxf(layout, units = "mm") {
     pair(0, "LTYPE"), pair(100, "AcDbSymbolTableRecord"), pair(100, "AcDbLinetypeTableRecord"),
     pair(2, "DASHED"), pair(70, 0), pair(3, "Dashed __ __"), pair(72, 65), pair(73, 2),
     pair(40, 9 * scale), pair(49, 6 * scale), pair(74, 0), pair(49, -3 * scale), pair(74, 0),
-    pair(0, "ENDTAB"), pair(0, "TABLE"), pair(2, "LAYER"), pair(70, 6),
+    pair(0, "ENDTAB"), pair(0, "TABLE"), pair(2, "LAYER"), pair(70, 8),
   ];
   for (const [name, color, lineType] of [
     ["CUT_OUTSIDE", 7, "CONTINUOUS"],
-    [pocketLayer, 5, "CONTINUOUS"],
-    [insetPocketLayer, 5, "CONTINUOUS"],
+    [bottomPocketLayer, 5, "CONTINUOUS"],
+    [bottomInsetPocketLayer, 5, "CONTINUOUS"],
+    [topPocketLayer, 5, "CONTINUOUS"],
+    [topInsetPocketLayer, 5, "CONTINUOUS"],
     [hiddenPocketLayer, 4, "CONTINUOUS"],
     ["MITER_END", 3, "DASHED"],
     ["ANNOTATION", 8, "CONTINUOUS"],

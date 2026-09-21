@@ -55,8 +55,8 @@ h2 { font-size: 17px; }
 fieldset { border: 0; padding: 0; margin: 0 0 25px; }
 fieldset[hidden], .dogbone-toggle[hidden] { display: none; }
 legend { width: 100%; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 1px solid var(--border); color: #b8c0b6; font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
-.dimension-basis-fieldset, .wall-connection-fieldset, .bottom-type-fieldset { margin-bottom: 12px; }
-.dimension-basis-fieldset .select-row, .wall-connection-fieldset .select-row, .bottom-type-fieldset .select-row { margin-top: 0; }
+.dimension-basis-fieldset, .wall-connection-fieldset, .bottom-type-fieldset, .top-type-fieldset { margin-bottom: 12px; }
+.dimension-basis-fieldset .select-row, .wall-connection-fieldset .select-row, .bottom-type-fieldset .select-row, .top-type-fieldset .select-row { margin-top: 0; }
 .select-row { display: grid; grid-template-columns: 1fr 140px; align-items: center; gap: 12px; margin-top: 12px; color: #c8cec5; font-size: 12px; }
 .select-row select { width: 100%; height: 38px; padding: 0 28px 0 10px; border: 1px solid #343d34; border-radius: 5px; outline: 0; color: var(--text); background: #0d120e; font-size: 11px; cursor: pointer; }
 .select-row select:focus { border-color: var(--accent-dim); box-shadow: 0 0 0 3px rgba(201, 242, 71, .07); }
@@ -109,7 +109,7 @@ legend { width: 100%; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 1p
 .piece-options label { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px 9px; border: 1px solid #303930; border-radius: 5px; color: #aeb6ac; background: #0d120e; font-size: 10px; cursor: pointer; transition: border-color .18s, color .18s; }
 .piece-options label[hidden], .assembly-legend-item[hidden] { display: none; }
 .piece-options label:hover { border-color: #465046; color: var(--text); }
-.piece-options label:last-child { grid-column: 1 / -1; }
+#bottomPieceOption, #topPieceOption { grid-column: 1 / -1; }
 .piece-options input { width: 13px; height: 13px; flex: 0 0 auto; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .piece-options input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .piece-options span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -152,7 +152,7 @@ legend { width: 100%; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 1p
 .layer-legend .download-button { width: 148px; height: 34px; margin-left: auto; padding: 0 11px; font-size: 10px; }
 .layer-legend .download-button svg { width: 15px; }
 .swatch { width: 8px; height: 8px; display: inline-block; margin-right: 5px; border-radius: 2px; }
-.swatch.wall { background: var(--wood); }.swatch.bottom { background: #7f9b55; }.swatch.groove { border: 1px dashed var(--cyan); }.swatch.overlap { background: var(--red); box-shadow: 0 0 8px rgba(255, 107, 93, .35); }.swatch.empty { background: #52cfeb; box-shadow: 0 0 8px rgba(82, 207, 235, .35); }
+.swatch.wall { background: var(--wood); }.swatch.bottom { background: #7f9b55; }.swatch.top { background: #668cac; }.swatch.groove { border: 1px dashed var(--cyan); }.swatch.overlap { background: var(--red); box-shadow: 0 0 8px rgba(255, 107, 93, .35); }.swatch.empty { background: #52cfeb; box-shadow: 0 0 8px rgba(82, 207, 235, .35); }
 .overlap-legend-item, .empty-legend-item { display: none; }
 .viewer-footer.overlap-mode .assembly-legend-item, .viewer-footer.empty-mode .assembly-legend-item { display: none; }
 .viewer-footer.overlap-mode .overlap-legend-item { display: block; }

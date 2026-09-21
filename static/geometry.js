@@ -10,10 +10,17 @@ const FIELD_RULES = {
   bottom_slot_extra: [0, 10, 0.53975],
   bottom_slot_depth: [0.1, 50, 6.35],
   bottom_inset_depth: [0.1, 30, 3.175],
+  top_thickness: [1, 30, 6.35],
+  top_slot_extra: [0, 10, 0.53975],
+  top_slot_depth: [0.1, 50, 6.35],
+  top_inset_depth: [0.1, 30, 3.175],
   cutter_diameter: [0.1, 50, 3.175],
 };
 const BOTTOM_TYPES = new Set([
   "none", "captured", "inset", "butt_bottom", "butt_inside", "finger_jointed", "hidden_finger_jointed",
+]);
+const TOP_TYPES = new Set([
+  "none", "captured", "inset", "butt_top", "butt_inside", "finger_jointed", "hidden_finger_jointed",
 ]);
 const WALL_CONNECTIONS = new Set(["finger", "hidden_finger", "miter", "butt_front_back", "butt_sides"]);
 const DIMENSION_BASES = new Set(["exterior", "interior"]);
@@ -72,6 +79,12 @@ export function validateSpec(values) {
   }
   spec.bottom_type = bottomType;
 
+  const topType = values.top_type ?? "none";
+  if (!TOP_TYPES.has(topType)) {
+    throw new Error("top type must be none, captured, inset, butt-top, butt-inside, finger jointed, or hidden fingers");
+  }
+  spec.top_type = topType;
+
   const wallConnection = values.wall_connection ?? "finger";
   if (!WALL_CONNECTIONS.has(wallConnection)) {
     throw new Error("wall connection must be finger, hidden finger, miter, butt-front/back, or butt-sides");
@@ -94,6 +107,16 @@ export function validateSpec(values) {
   }
   spec.bottom_slot_offset = bottomSlotOffset;
 
+  const rawTopOffset = values.top_slot_offset ?? spec.wall_thickness;
+  const topSlotOffset = typeof rawTopOffset === "string" && rawTopOffset.trim() === ""
+    ? Number.NaN
+    : Number(rawTopOffset);
+  if (!Number.isFinite(topSlotOffset)) throw new Error("top slot offset must be a number");
+  if (topSlotOffset < 0 || topSlotOffset > 1000) {
+    throw new Error("top slot offset must be between 0 and 1000 mm");
+  }
+  spec.top_slot_offset = topSlotOffset;
+
   const exterior = exteriorDimensions(spec);
   if (exterior.width <= spec.wall_thickness * 3) {
     throw new Error("width must be more than three wall thicknesses");
@@ -102,16 +125,19 @@ export function validateSpec(values) {
     throw new Error("depth must be more than three wall thicknesses");
   }
   const minimumHeight = spec.wall_thickness * 2
-    + (spec.bottom_type === "none" ? 0 : spec.bottom_thickness);
+    + (spec.bottom_type === "none" ? 0 : spec.bottom_thickness)
+    + (spec.top_type === "none" ? 0 : spec.top_thickness);
   if (exterior.height <= minimumHeight) {
     throw new Error("height is too small for the selected materials");
   }
   const wallPanelHeight = exterior.height
-    - (spec.bottom_type === "butt_bottom" ? spec.bottom_thickness : 0);
+    - (spec.bottom_type === "butt_bottom" ? spec.bottom_thickness : 0)
+    - (spec.top_type === "butt_top" ? spec.top_thickness : 0);
   if (spec.finger_size > wallPanelHeight / 2) {
     throw new Error("finger size must be no more than half the box height");
   }
   const usesHiddenFingers = spec.bottom_type === "hidden_finger_jointed"
+    || spec.top_type === "hidden_finger_jointed"
     || spec.wall_connection === "hidden_finger";
   if (usesHiddenFingers && spec.hidden_finger_skin >= spec.wall_thickness) {
     throw new Error("hidden finger skin must be thinner than the wall material");
@@ -138,6 +164,31 @@ export function validateSpec(values) {
         || exterior.depth <= 2 * (spec.wall_thickness + spec.joint_clearance))) {
     throw new Error("joint clearance leaves no raised center on the inset bottom");
   }
+  if (spec.top_type === "captured") {
+    if (spec.top_slot_depth + spec.top_slot_extra > spec.wall_thickness) {
+      throw new Error("top slot depth plus extra cannot exceed the wall thickness");
+    }
+    if (spec.top_slot_extra >= spec.top_slot_depth) {
+      throw new Error("top slot extra must be smaller than the slot depth");
+    }
+    if (spec.top_slot_offset + spec.top_thickness + spec.top_slot_extra > exterior.height) {
+      throw new Error("top slot offset places the slot below the panel");
+    }
+  }
+  if (spec.top_type === "inset" && spec.top_inset_depth >= spec.top_thickness) {
+    throw new Error("top inset depth must be smaller than the top material thickness");
+  }
+  if (spec.top_type === "inset"
+      && (exterior.width <= 2 * (spec.wall_thickness + spec.joint_clearance)
+        || exterior.depth <= 2 * (spec.wall_thickness + spec.joint_clearance))) {
+    throw new Error("joint clearance leaves no raised center on the inset top");
+  }
+  if (spec.bottom_type === "captured" && spec.top_type === "captured") {
+    const bottomGrooveTop = spec.bottom_slot_offset + spec.bottom_thickness + spec.bottom_slot_extra;
+    const topGrooveBottom = exterior.height
+      - spec.top_slot_offset - spec.top_thickness - spec.top_slot_extra;
+    if (bottomGrooveTop >= topGrooveBottom) throw new Error("top and bottom slots overlap");
+  }
   return spec;
 }
 
@@ -148,6 +199,13 @@ function interiorFloorTop(spec) {
   return spec.bottom_type === "none" ? 0 : spec.bottom_thickness;
 }
 
+function interiorCeilingDepth(spec) {
+  if (spec.top_type === "captured") {
+    return spec.top_slot_offset + spec.top_slot_extra / 2 + spec.top_thickness;
+  }
+  return spec.top_type === "none" ? 0 : spec.top_thickness;
+}
+
 function exteriorDimensions(spec) {
   if (spec.dimension_basis !== "interior") {
     return { width: spec.width, depth: spec.depth, height: spec.height };
@@ -155,7 +213,7 @@ function exteriorDimensions(spec) {
   return {
     width: spec.width + 2 * spec.wall_thickness,
     depth: spec.depth + 2 * spec.wall_thickness,
-    height: spec.height + interiorFloorTop(spec),
+    height: spec.height + interiorFloorTop(spec) + interiorCeilingDepth(spec),
   };
 }
 
@@ -163,7 +221,7 @@ function interiorDimensions(spec) {
   return {
     width: spec.width - 2 * spec.wall_thickness,
     depth: spec.depth - 2 * spec.wall_thickness,
-    height: spec.height - interiorFloorTop(spec),
+    height: spec.height - interiorFloorTop(spec) - interiorCeilingDepth(spec),
   };
 }
 
@@ -523,7 +581,9 @@ function fingeredPanel({
   jointDepth,
   label,
   groove,
+  topGroove = null,
   grooveDepth,
+  topGrooveDepth = 0,
   cutterDiameter,
   jointClearance,
   useDogbones,
@@ -537,15 +597,23 @@ function fingeredPanel({
   hiddenVerticalPocketReach = null,
   hiddenVerticalPocketBaseReach = 0,
   hiddenBottomPockets = false,
+  topMode = "plain",
+  topJointDepth = jointDepth,
+  topJointInsets = [0, 0],
+  topPhase = 0,
+  hiddenTopPockets = false,
   hiddenPocketDepth = 0,
 }) {
   const [bottomStartInset, bottomEndInset] = bottomJointInsets;
+  const [topStartInset, topEndInset] = topJointInsets;
   const corners = [
     [[0, 0], [bottomStartInset, 0], "plain", 0, jointDepth, 0],
     [[bottomStartInset, 0], [width - bottomEndInset, 0], bottomMode, bottomPhase, bottomJointDepth, jointClearance],
     [[width - bottomEndInset, 0], [width, 0], "plain", 0, jointDepth, 0],
     [[width, 0], [width, height], verticalMode, 0, verticalJointDepth, jointClearance],
-    [[width, height], [0, height], "plain", 0, jointDepth, 0],
+    [[width, height], [width - topStartInset, height], "plain", 0, jointDepth, 0],
+    [[width - topStartInset, height], [topEndInset, height], topMode, topPhase, topJointDepth, jointClearance],
+    [[topEndInset, height], [0, height], "plain", 0, jointDepth, 0],
     [[0, height], [0, 0], verticalMode, 0, verticalJointDepth, jointClearance],
   ];
   const outline = [];
@@ -569,18 +637,19 @@ function fingeredPanel({
     bulges: routedOutline.bulges,
   }];
 
-  if (groove) {
-    let [gx, gy, gw, gh] = groove;
+  const addGroove = (grooveRect, depth, layer) => {
+    if (!grooveRect) return;
+    let [gx, gy, gw, gh] = grooveRect;
     const pieceLeft = Math.min(...squareOutline.map((point) => point[0]));
     const pieceRight = Math.max(...squareOutline.map((point) => point[0]));
     const grooveLeft = Math.max(pieceLeft, gx);
     const grooveRight = Math.min(pieceRight, gx + gw);
     gx = grooveLeft;
     gw = Math.max(0, grooveRight - grooveLeft);
-    operations.push({ type: "groove", rect: [gx, gy, gw, gh], depth: grooveDepth });
+    operations.push({ type: "groove", rect: [gx, gy, gw, gh], depth });
     entities.push({
       type: "polyline",
-      layer: "POCKET_BOTTOM_SLOT",
+      layer,
       closed: true,
       points: [
         [x + gx, y + gy],
@@ -589,7 +658,9 @@ function fingeredPanel({
         [x + gx, y + gy + gh],
       ],
     });
-  }
+  };
+  addGroove(groove, grooveDepth, "POCKET_BOTTOM_SLOT");
+  addGroove(topGroove, topGrooveDepth, "POCKET_TOP_SLOT");
   const addHiddenPocket = (rect, openSide) => {
     let [px, py, pw, ph] = rect;
     const right = Math.min(width, px + pw);
@@ -613,9 +684,12 @@ function fingeredPanel({
     } else if (openSide === "right") {
       if (py > 1e-9) reliefIndices.push(0);
       if (py + ph < height - 1e-9) reliefIndices.push(3);
-    } else {
+    } else if (openSide === "bottom") {
       if (px + pw < width - 1e-9) reliefIndices.push(2);
       if (px > 1e-9) reliefIndices.push(3);
+    } else {
+      if (px > 1e-9) reliefIndices.push(0);
+      if (px + pw < width - 1e-9) reliefIndices.push(1);
     }
     const routedPocket = useDogbones
       ? dogbonePocketOutline(pocketOutline, reliefIndices, cutterDiameter / 2, jointClearance)
@@ -675,6 +749,18 @@ function fingeredPanel({
       ], "bottom");
     }
   }
+  if (hiddenTopPockets) {
+    const reach = topJointDepth + jointClearance;
+    const runLength = width - topStartInset - topEndInset;
+    for (const [start, end] of fingerPocketIntervals(runLength, fingerSize, topPhase, jointClearance)) {
+      addHiddenPocket([
+        topEndInset + start,
+        height - reach,
+        end - start,
+        reach,
+      ], "top");
+    }
+  }
   if (miteredEdges) {
     for (const endX of [jointDepth, width - jointDepth]) {
       entities.push({
@@ -710,7 +796,7 @@ function fingeredPanel({
   };
 }
 
-function bottomPart({
+function panelPart({
   x,
   y,
   coreWidth,
@@ -722,10 +808,12 @@ function bottomPart({
   cutterDiameter,
   useDogbones,
   label,
+  name,
   assembly,
   edgePhase = 0,
   insetPockets = [],
   insetPocketDepth = 0,
+  insetPocketLayer = "POCKET_BOTTOM_INSET",
 }) {
   const edges = [
     [[0, 0], [coreWidth, 0]],
@@ -769,7 +857,7 @@ function bottomPart({
       const [px, py, pw, ph] = rect;
       return {
         type: "polyline",
-        layer: "POCKET_BOTTOM_INSET",
+        layer: insetPocketLayer,
         closed: true,
         points: [
           [x + px, y + py],
@@ -789,7 +877,7 @@ function bottomPart({
     },
   ];
   return {
-    name: "BOTTOM",
+    name,
     width: bounds.maxX - bounds.minX,
     height: bounds.maxY - bounds.minY,
     thickness,
@@ -830,19 +918,32 @@ export function buildLayout(values) {
   const fingerJointedBottom = spec.bottom_type === "finger_jointed";
   const hiddenFingerBottom = spec.bottom_type === "hidden_finger_jointed";
   const hasFingerBottom = fingerJointedBottom || hiddenFingerBottom;
+  const hasTop = spec.top_type !== "none";
+  const capturedTop = spec.top_type === "captured";
+  const insetTop = spec.top_type === "inset";
+  const fingerJointedTop = spec.top_type === "finger_jointed";
+  const hiddenFingerTop = spec.top_type === "hidden_finger_jointed";
+  const hasFingerTop = fingerJointedTop || hiddenFingerTop;
   const hiddenFingerWalls = spec.wall_connection === "hidden_finger";
   const fingerWalls = spec.wall_connection === "finger" || hiddenFingerWalls;
   const miteredWalls = spec.wall_connection === "miter";
   const hiddenPocketDepth = wall - spec.hidden_finger_skin;
   const hiddenTabDepth = hiddenPocketDepth - spec.joint_clearance;
-  const clearance = capturedBottom ? spec.bottom_slot_extra : 0;
-  const slotHeight = capturedBottom ? spec.bottom_thickness + clearance : 0;
-  const slotY = capturedBottom ? spec.bottom_slot_offset : 0;
-  const pocketDepth = capturedBottom
-    ? roundTo(spec.bottom_slot_depth + clearance, 12)
+  const bottomClearance = capturedBottom ? spec.bottom_slot_extra : 0;
+  const bottomSlotHeight = capturedBottom ? spec.bottom_thickness + bottomClearance : 0;
+  const bottomSlotY = capturedBottom ? spec.bottom_slot_offset : 0;
+  const bottomPocketDepth = capturedBottom
+    ? roundTo(spec.bottom_slot_depth + bottomClearance, 12)
     : insetBottom ? spec.bottom_inset_depth : 0;
-  const slotExtension = pocketDepth;
-  const engagement = capturedBottom ? spec.bottom_slot_depth : 0;
+  const bottomSlotExtension = bottomPocketDepth;
+  const bottomEngagement = capturedBottom ? spec.bottom_slot_depth : 0;
+  const topClearance = capturedTop ? spec.top_slot_extra : 0;
+  const topSlotHeight = capturedTop ? spec.top_thickness + topClearance : 0;
+  const topPocketDepth = capturedTop
+    ? roundTo(spec.top_slot_depth + topClearance, 12)
+    : insetTop ? spec.top_inset_depth : 0;
+  const topSlotExtension = topPocketDepth;
+  const topEngagement = capturedTop ? spec.top_slot_depth : 0;
   const fullWidthFronts = miteredWalls || hiddenFingerWalls || spec.wall_connection === "butt_sides";
   const insetSides = spec.wall_connection === "butt_sides";
   const frontWidth = fullWidthFronts ? spec.width : spec.width - 2 * wall;
@@ -856,7 +957,10 @@ export function buildLayout(values) {
   const wallBaseZ = spec.bottom_type === "butt_bottom"
     ? spec.bottom_thickness
     : insetBottom ? spec.bottom_thickness - spec.bottom_inset_depth : 0;
-  const wallHeight = spec.height - wallBaseZ;
+  const wallTopZ = spec.top_type === "butt_top"
+    ? spec.height - spec.top_thickness
+    : insetTop ? spec.height - (spec.top_thickness - spec.top_inset_depth) : spec.height;
+  const wallHeight = wallTopZ - wallBaseZ;
   const assembledHeight = spec.height;
 
   const common = {
@@ -864,7 +968,8 @@ export function buildLayout(values) {
     fingerSize: spec.finger_size,
     jointDepth: wall,
     verticalJointDepth: wall,
-    grooveDepth: pocketDepth,
+    grooveDepth: bottomPocketDepth,
+    topGrooveDepth: topPocketDepth,
     cutterDiameter: spec.cutter_diameter,
     jointClearance: spec.joint_clearance,
     useDogbones: spec.use_dogbones,
@@ -872,16 +977,31 @@ export function buildLayout(values) {
     bottomJointDepth: spec.bottom_thickness,
     bottomPhase: hasFingerBottom ? 1 : 0,
     hiddenBottomPockets: hiddenFingerBottom,
+    topMode: fingerJointedTop ? "slot" : "plain",
+    topJointDepth: spec.top_thickness,
+    topPhase: hasFingerTop ? 1 : 0,
+    hiddenTopPockets: hiddenFingerTop,
     hiddenPocketDepth,
     miteredEdges: miteredWalls,
   };
   const capturedGroove = (origin, axisLength) => capturedBottom
-    ? [wall - slotExtension - origin, slotY, axisLength - 2 * wall + 2 * slotExtension, slotHeight]
+    ? [wall - bottomSlotExtension - origin, bottomSlotY,
+      axisLength - 2 * wall + 2 * bottomSlotExtension, bottomSlotHeight]
+    : null;
+  const capturedTopGroove = (origin, axisLength) => capturedTop
+    ? [wall - topSlotExtension - origin, wallHeight - spec.top_slot_offset - topSlotHeight,
+      axisLength - 2 * wall + 2 * topSlotExtension, topSlotHeight]
     : null;
   const frontBottomInsets = hasFingerBottom
     ? [wall - frontOriginX, frontOriginX + frontWidth - (spec.width - wall)]
     : [0, 0];
   const sideBottomInsets = hasFingerBottom
+    ? [wall - sideOriginY, sideOriginY + sideWidth - (spec.depth - wall)]
+    : [0, 0];
+  const frontTopInsets = hasFingerTop
+    ? [wall - frontOriginX, frontOriginX + frontWidth - (spec.width - wall)]
+    : [0, 0];
+  const sideTopInsets = hasFingerTop
     ? [wall - sideOriginY, sideOriginY + sideWidth - (spec.depth - wall)]
     : [0, 0];
   const placements = [
@@ -897,7 +1017,9 @@ export function buildLayout(values) {
       hiddenVerticalPocketBaseReach: spec.hidden_finger_skin + spec.joint_clearance,
       label: "FRONT",
       groove: capturedGroove(frontOriginX, spec.width),
+      topGroove: capturedTopGroove(frontOriginX, spec.width),
       bottomJointInsets: frontBottomInsets,
+      topJointInsets: frontTopInsets,
     }),
     fingeredPanel({
       ...common,
@@ -911,7 +1033,9 @@ export function buildLayout(values) {
       hiddenVerticalPocketBaseReach: spec.hidden_finger_skin + spec.joint_clearance,
       label: "BACK",
       groove: capturedGroove(frontOriginX, spec.width),
+      topGroove: capturedTopGroove(frontOriginX, spec.width),
       bottomJointInsets: frontBottomInsets,
+      topJointInsets: frontTopInsets,
     }),
     fingeredPanel({
       ...common,
@@ -925,7 +1049,9 @@ export function buildLayout(values) {
       hiddenVerticalPocketBaseReach: spec.joint_clearance,
       label: "LEFT SIDE",
       groove: capturedGroove(sideOriginY, spec.depth),
+      topGroove: capturedTopGroove(sideOriginY, spec.depth),
       bottomJointInsets: sideBottomInsets,
+      topJointInsets: sideTopInsets,
     }),
     fingeredPanel({
       ...common,
@@ -939,7 +1065,9 @@ export function buildLayout(values) {
       hiddenVerticalPocketBaseReach: spec.joint_clearance,
       label: "RIGHT SIDE",
       groove: capturedGroove(sideOriginY, spec.depth),
+      topGroove: capturedTopGroove(sideOriginY, spec.depth),
       bottomJointInsets: sideBottomInsets,
+      topJointInsets: sideTopInsets,
     }),
   ];
 
@@ -953,20 +1081,21 @@ export function buildLayout(values) {
 
   const bottomY = margin + 2 * (wallHeight + gap);
   const insetPocketWidth = wall + spec.joint_clearance;
-  const insetPockets = insetBottom ? [
+  const insetPockets = [
     [0, 0, spec.width, insetPocketWidth],
     [0, spec.depth - insetPocketWidth, spec.width, insetPocketWidth],
     [0, insetPocketWidth, insetPocketWidth, spec.depth - 2 * insetPocketWidth],
     [spec.width - insetPocketWidth, insetPocketWidth, insetPocketWidth, spec.depth - 2 * insetPocketWidth],
-  ] : [];
+  ];
   const bottomConfigurations = {
     captured: {
-      coreWidth: spec.width - 2 * wall + 2 * engagement,
-      coreDepth: spec.depth - 2 * wall + 2 * engagement,
+      coreWidth: spec.width - 2 * wall + 2 * bottomEngagement,
+      coreDepth: spec.depth - 2 * wall + 2 * bottomEngagement,
       edgeMode: "plain",
       jointDepth: 0,
       label: "CAPTURED BOTTOM",
-      assemblyOrigin: [wall - engagement, wall - engagement, slotY + clearance / 2],
+      assemblyOrigin: [wall - bottomEngagement, wall - bottomEngagement,
+        bottomSlotY + bottomClearance / 2],
     },
     inset: {
       coreWidth: spec.width,
@@ -1013,7 +1142,7 @@ export function buildLayout(values) {
   if (hasBottom) {
     const bottomConfig = bottomConfigurations[spec.bottom_type];
     const bottomLayoutInset = bottomConfig.edgeMode === "tab" ? wall : 0;
-    bottom = bottomPart({
+    bottom = panelPart({
       x: margin + bottomLayoutInset,
       y: bottomY + bottomLayoutInset,
       coreWidth: bottomConfig.coreWidth,
@@ -1025,8 +1154,9 @@ export function buildLayout(values) {
       cutterDiameter: spec.cutter_diameter,
       useDogbones: spec.use_dogbones,
       label: bottomConfig.label,
+      name: "BOTTOM",
       edgePhase: bottomConfig.edgeMode === "tab" ? 1 : 0,
-      insetPockets,
+      insetPockets: insetBottom ? insetPockets : [],
       insetPocketDepth: insetBottom ? spec.bottom_inset_depth : 0,
       assembly: {
         origin: bottomConfig.assemblyOrigin,
@@ -1037,6 +1167,90 @@ export function buildLayout(values) {
       },
     });
     placements.push(bottom);
+  }
+
+  const topConfigurations = {
+    captured: {
+      coreWidth: spec.width - 2 * wall + 2 * topEngagement,
+      coreDepth: spec.depth - 2 * wall + 2 * topEngagement,
+      edgeMode: "plain",
+      jointDepth: 0,
+      label: "CAPTURED TOP",
+      assemblyOrigin: [wall - topEngagement, wall - topEngagement,
+        spec.height - spec.top_slot_offset - topClearance / 2],
+    },
+    inset: {
+      coreWidth: spec.width,
+      coreDepth: spec.depth,
+      edgeMode: "plain",
+      jointDepth: 0,
+      label: "INSET TOP",
+      assemblyOrigin: [0, 0, spec.height],
+    },
+    butt_top: {
+      coreWidth: spec.width,
+      coreDepth: spec.depth,
+      edgeMode: "plain",
+      jointDepth: 0,
+      label: "BUTT-TOP",
+      assemblyOrigin: [0, 0, spec.height],
+    },
+    butt_inside: {
+      coreWidth: spec.width - 2 * wall,
+      coreDepth: spec.depth - 2 * wall,
+      edgeMode: "plain",
+      jointDepth: 0,
+      label: "BUTT-INSIDE TOP",
+      assemblyOrigin: [wall, wall, spec.height],
+    },
+    finger_jointed: {
+      coreWidth: spec.width - 2 * wall,
+      coreDepth: spec.depth - 2 * wall,
+      edgeMode: "tab",
+      jointDepth: wall,
+      label: "FINGER-JOINTED TOP",
+      assemblyOrigin: [wall, wall, spec.height],
+    },
+    hidden_finger_jointed: {
+      coreWidth: spec.width - 2 * wall,
+      coreDepth: spec.depth - 2 * wall,
+      edgeMode: "tab",
+      jointDepth: hiddenTabDepth,
+      label: "HIDDEN-FINGER TOP",
+      assemblyOrigin: [wall, wall, spec.height],
+    },
+  };
+  let top = null;
+  if (hasTop) {
+    const topConfig = topConfigurations[spec.top_type];
+    const topLayoutInset = topConfig.edgeMode === "tab" ? wall : 0;
+    const topY = bottomY + (hasBottom ? spec.depth + 2 * wall + gap : 0);
+    top = panelPart({
+      x: margin + topLayoutInset,
+      y: topY + topLayoutInset,
+      coreWidth: topConfig.coreWidth,
+      coreDepth: topConfig.coreDepth,
+      thickness: spec.top_thickness,
+      edgeMode: topConfig.edgeMode,
+      fingerSize: spec.finger_size,
+      jointDepth: topConfig.jointDepth,
+      cutterDiameter: spec.cutter_diameter,
+      useDogbones: spec.use_dogbones,
+      label: topConfig.label,
+      name: "TOP",
+      edgePhase: topConfig.edgeMode === "tab" ? 1 : 0,
+      insetPockets: insetTop ? insetPockets : [],
+      insetPocketDepth: insetTop ? spec.top_inset_depth : 0,
+      insetPocketLayer: "POCKET_TOP_INSET",
+      assembly: {
+        origin: topConfig.assemblyOrigin,
+        u_axis: [1, 0, 0],
+        v_axis: [0, 1, 0],
+        thickness_axis: [0, 0, -1],
+        explode_axis: [0, 0, 1],
+      },
+    });
+    placements.push(top);
   }
 
   const entities = placements.flatMap((part) => part.entities);
@@ -1054,22 +1268,32 @@ export function buildLayout(values) {
     bounds: entityBounds(entities),
     manufacturing: {
       bottom_type: spec.bottom_type,
+      top_type: spec.top_type,
       wall_connection: spec.wall_connection,
       has_bottom_groove: capturedBottom,
       has_bottom_pocket: capturedBottom || insetBottom,
+      has_top_groove: capturedTop,
+      has_top_pocket: capturedTop || insetTop,
       dogbones_enabled: spec.use_dogbones,
       dogbone_diameter: roundTo(spec.cutter_diameter, 3),
       joint_clearance: roundTo(spec.joint_clearance, 3),
       hidden_finger_skin: roundTo(spec.hidden_finger_skin, 3),
-      hidden_finger_pocket_depth: (hiddenFingerWalls || hiddenFingerBottom)
+      hidden_finger_pocket_depth: (hiddenFingerWalls || hiddenFingerBottom || hiddenFingerTop)
         ? roundTo(hiddenPocketDepth, 3)
         : 0,
-      pocket_depth: pocketDepth,
-      groove_depth: roundTo(pocketDepth, 3),
-      groove_width: roundTo(slotHeight, 3),
-      groove_offset: roundTo(slotY, 3),
+      pocket_depth: bottomPocketDepth,
+      bottom_pocket_depth: bottomPocketDepth,
+      top_pocket_depth: topPocketDepth,
+      groove_depth: roundTo(bottomPocketDepth, 3),
+      groove_width: roundTo(bottomSlotHeight, 3),
+      groove_offset: roundTo(bottomSlotY, 3),
+      top_groove_depth: roundTo(topPocketDepth, 3),
+      top_groove_width: roundTo(topSlotHeight, 3),
+      top_groove_offset: roundTo(spec.top_slot_offset, 3),
       bottom_width: bottom ? roundTo(bottom.width, 3) : 0,
       bottom_depth: bottom ? roundTo(bottom.height, 3) : 0,
+      top_width: top ? roundTo(top.width, 3) : 0,
+      top_depth: top ? roundTo(top.height, 3) : 0,
     },
   };
 }

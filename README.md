@@ -1,6 +1,6 @@
 # Box
 
-A small, dependency-free browser app that generates a CNC-ready DXF layout for an open-top box. Geometry, previews, validation, DXF generation, and DXF settings import all run locally in the browser. Python only serves the static web files.
+A small, dependency-free browser app that generates a CNC-ready DXF layout for a box with an optional top. Geometry, previews, validation, DXF generation, and DXF settings import all run locally in the browser. Python only serves the static web files.
 
 ## Live interface
 
@@ -21,8 +21,8 @@ system too.
 
 The dimension-reference dropdown accepts either exterior extents or clear
 interior dimensions. Interior width and depth are measured between the inside
-wall faces. Interior height is measured from the finished top of the selected
-bottom to the open top (or is simply the wall height when no bottom is used).
+wall faces. Interior height is measured between the finished bottom and the
+underside of the top; a missing bottom or top contributes no thickness.
 
 Because the application is entirely static, the contents of `static/` can also
 be deployed to any static web host without Python.
@@ -60,12 +60,18 @@ previous Python implementation for exact layout and byte-for-byte DXF parity.
   the selected inset depth. The hidden-finger version fits shortened bottom
   tabs into blind pockets on the inside faces of all four walls. Wall heights
   are adjusted where needed so every mode preserves the entered outside height.
+- The top defaults to none and offers the same seven mirrored constructions:
+  none, captured, rabbeted inset, full-footprint butt-top, wall-inset
+  butt-inside, through-finger jointed, and hidden-finger jointed. Top material,
+  captured-slot, and inset-depth settings are independent from the bottom.
 - `POCKET_BOTTOM_SLOT_<depth><unit>` contains the captured-bottom grooves. The
   calculated pocket depth is included to three decimal places in the layer name,
   such as `POCKET_BOTTOM_SLOT_0.271IN`, and is also shown in the app.
 - `POCKET_BOTTOM_INSET_<depth><unit>` contains the four perimeter pocket regions
   for the inset bottom. The pocket extends inward by the wall thickness plus
   the selected joint clearance.
+- `POCKET_TOP_SLOT_<depth><unit>` and `POCKET_TOP_INSET_<depth><unit>` contain
+  the corresponding captured grooves and underside inset pockets for a top.
 - `POCKET_HIDDEN_FINGERS_<depth><unit>` contains the blind wall and bottom-joint
   pockets. Their depth is the wall material thickness minus the selected hidden
   skin thickness.

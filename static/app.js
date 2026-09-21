@@ -7,9 +7,13 @@ const dogboneCheckbox = document.querySelector("#use_dogbones");
 const dimensionBasisSelect = document.querySelector("#dimension_basis");
 const wallConnectionSelect = document.querySelector("#wall_connection");
 const bottomTypeSelect = document.querySelector("#bottom_type");
+const topTypeSelect = document.querySelector("#top_type");
 const capturedSettingRows = [...document.querySelectorAll(".captured-setting")];
 const insetSettingRows = [...document.querySelectorAll(".inset-setting")];
+const topCapturedSettingRows = [...document.querySelectorAll(".top-captured-setting")];
+const topInsetSettingRows = [...document.querySelectorAll(".top-inset-setting")];
 const bottomSettingRows = [...document.querySelectorAll(".bottom-setting")];
+const topSettingRows = [...document.querySelectorAll(".top-setting")];
 const fingerJointSettingRows = [...document.querySelectorAll(".finger-joint-setting")];
 const jointClearanceSettingRows = [...document.querySelectorAll(".joint-clearance-setting")];
 const hiddenFingerSettingRows = [...document.querySelectorAll(".hidden-finger-setting")];
@@ -45,6 +49,15 @@ const bottomTypeLabels = {
   finger_jointed: "Finger-jointed bottom",
   hidden_finger_jointed: "Hidden-finger bottom",
 };
+const topTypeLabels = {
+  none: "None",
+  captured: "Captured top",
+  inset: "Inset top",
+  butt_top: "Butt-top",
+  butt_inside: "Butt-inside top",
+  finger_jointed: "Finger-jointed top",
+  hidden_finger_jointed: "Hidden-finger top",
+};
 const wallConnectionLabels = {
   finger: "Finger joints",
   hidden_finger: "Hidden fingers",
@@ -54,7 +67,7 @@ const wallConnectionLabels = {
 };
 const dimensionBasisHelp = {
   exterior: "Width, depth, and height are the box's exterior extents.",
-  interior: "Width and depth are clear between the walls; height is clear above the finished bottom.",
+  interior: "Width and depth are clear between the walls; height is clear between the finished bottom and top.",
 };
 
 let displayUnit = "in";
@@ -72,6 +85,7 @@ const partColors = {
   "LEFT SIDE": "#a96f32",
   "RIGHT SIDE": "#d2a15d",
   BOTTOM: "#78934f",
+  TOP: "#668cac",
 };
 
 const fieldLimits = {
@@ -87,6 +101,11 @@ const fieldLimits = {
   bottom_slot_depth: [.1, 50, .1],
   bottom_slot_offset: [0, 1000, .1],
   bottom_inset_depth: [.1, 30, .1],
+  top_thickness: [1, 30, .1],
+  top_slot_extra: [0, 10, .1],
+  top_slot_depth: [.1, 50, .1],
+  top_slot_offset: [0, 1000, .1],
+  top_inset_depth: [.1, 30, .1],
   cutter_diameter: [.1, 50, .001],
 };
 const inchSteps = {
@@ -102,6 +121,11 @@ const inchSteps = {
   bottom_slot_depth: ".001",
   bottom_slot_offset: ".001",
   bottom_inset_depth: ".001",
+  top_thickness: ".001",
+  top_slot_extra: ".00001",
+  top_slot_depth: ".001",
+  top_slot_offset: ".001",
+  top_inset_depth: ".001",
   cutter_diameter: ".001",
 };
 
@@ -116,6 +140,7 @@ function readSpec() {
     dimension_basis: dimensionBasisSelect.value,
     wall_connection: wallConnectionSelect.value,
     bottom_type: bottomTypeSelect.value,
+    top_type: topTypeSelect.value,
   };
 }
 
@@ -131,20 +156,45 @@ function updateWallConnectionControls() {
 
 function updateJoineryControls() {
   const hasFingerJoints = ["finger", "hidden_finger"].includes(wallConnectionSelect.value)
-    || ["finger_jointed", "hidden_finger_jointed"].includes(bottomTypeSelect.value);
+    || ["finger_jointed", "hidden_finger_jointed"].includes(bottomTypeSelect.value)
+    || ["finger_jointed", "hidden_finger_jointed"].includes(topTypeSelect.value);
   const hasHiddenFingers = wallConnectionSelect.value === "hidden_finger"
-    || bottomTypeSelect.value === "hidden_finger_jointed";
-  const hasBottomPocket = ["captured", "inset"].includes(bottomTypeSelect.value);
-  const usesJointClearance = hasFingerJoints || bottomTypeSelect.value === "inset";
+    || bottomTypeSelect.value === "hidden_finger_jointed"
+    || topTypeSelect.value === "hidden_finger_jointed";
+  const hasPanelPocket = [bottomTypeSelect.value, topTypeSelect.value]
+    .some((type) => ["captured", "inset"].includes(type));
+  const usesJointClearance = hasFingerJoints
+    || bottomTypeSelect.value === "inset" || topTypeSelect.value === "inset";
   fingerJointSettingRows.forEach((row) => { row.hidden = !hasFingerJoints; });
   jointClearanceSettingRows.forEach((row) => { row.hidden = !usesJointClearance; });
   hiddenFingerSettingRows.forEach((row) => { row.hidden = !hasHiddenFingers; });
   document.querySelector("#dogboneToggle").hidden = !hasFingerJoints;
-  document.querySelector("#joinerySettings").hidden = !hasFingerJoints && !hasBottomPocket;
-  document.querySelector("#grooveLegend").hidden = !hasBottomPocket && !hasHiddenFingers;
-  document.querySelector("#grooveLegendLabel").textContent = hasHiddenFingers
+  document.querySelector("#joinerySettings").hidden = !hasFingerJoints && !hasPanelPocket;
+  document.querySelector("#grooveLegend").hidden = !hasPanelPocket && !hasHiddenFingers;
+  const pocketKinds = new Set([
+    hasHiddenFingers ? "hidden" : null,
+    ["captured", "inset"].includes(bottomTypeSelect.value) ? bottomTypeSelect.value : null,
+    ["captured", "inset"].includes(topTypeSelect.value) ? topTypeSelect.value : null,
+  ].filter(Boolean));
+  document.querySelector("#grooveLegendLabel").textContent = pocketKinds.size > 1 || hasHiddenFingers
     ? "Pocket cuts"
-    : bottomTypeSelect.value === "inset" ? "Inset pocket" : "Bottom groove";
+    : pocketKinds.has("inset") ? "Inset pocket" : "Panel groove";
+}
+
+function updateTopTypeControls() {
+  const topType = topTypeSelect.value;
+  const captured = topType === "captured";
+  const inset = topType === "inset";
+  const hasTop = topType !== "none";
+  topCapturedSettingRows.forEach((row) => { row.hidden = !captured; });
+  topInsetSettingRows.forEach((row) => { row.hidden = !inset; });
+  topSettingRows.forEach((row) => { row.hidden = !hasTop; });
+  document.querySelector("#topPieceLabel").textContent = topTypeLabels[topType];
+  document.querySelector("#topPieceOption").hidden = !hasTop;
+  document.querySelector("#topLegendLabel").textContent = topTypeLabels[topType];
+  document.querySelector("#topLegend").hidden = !hasTop;
+  updatePieceDrawingCount();
+  updateJoineryControls();
 }
 
 function updateBottomTypeControls() {
@@ -221,6 +271,11 @@ function parseDxfSettings(text) {
     joint_clearance: 0.254,
     hidden_finger_skin: 1.5875,
     bottom_inset_depth: 3.175,
+    top_thickness: Number(metadata.bottom_thickness_mm ?? 6.35),
+    top_slot_extra: Number(metadata.bottom_slot_extra_mm ?? 0.53975),
+    top_slot_depth: Number(metadata.bottom_slot_depth_mm ?? 6.35),
+    top_slot_offset: Number(metadata.bottom_slot_offset_mm ?? metadata.wall_thickness_mm ?? 12.7),
+    top_inset_depth: Number(metadata.bottom_inset_depth_mm ?? 3.175),
   };
   for (const input of inputs) {
     const savedValue = input.name === "joint_clearance"
@@ -240,6 +295,10 @@ function parseDxfSettings(text) {
   if (!Object.hasOwn(bottomTypeLabels, savedBottomType)) {
     throw new Error("The DXF has an invalid saved bottom type");
   }
+  const savedTopType = metadata.top_type ?? "none";
+  if (!Object.hasOwn(topTypeLabels, savedTopType)) {
+    throw new Error("The DXF has an invalid saved top type");
+  }
   const savedWallConnection = metadata.wall_connection ?? "finger";
   if (!Object.hasOwn(wallConnectionLabels, savedWallConnection)) {
     throw new Error("The DXF has an invalid saved wall connection");
@@ -253,6 +312,7 @@ function parseDxfSettings(text) {
     values,
     useDogbones: savedDogboneSetting === undefined ? true : savedDogboneSetting === "true",
     bottomType: savedBottomType,
+    topType: savedTopType,
     wallConnection: savedWallConnection,
     dimensionBasis: savedDimensionBasis,
   };
@@ -313,18 +373,20 @@ async function updateGeometry(successMessage = "Geometry ready") {
       ? result.assembled_dimensions
       : result.interior_dimensions;
     dimensionCard.textContent = `${displayedBasis} · ${measure(dimensions.width).replace(` ${displayUnit}`, "")} × ${measure(dimensions.depth).replace(` ${displayUnit}`, "")} × ${measure(dimensions.height)}`;
-    const hasHiddenPockets = result.manufacturing.hidden_finger_pocket_depth > 0;
-    const hasBottomPocket = result.manufacturing.has_bottom_pocket;
-    document.querySelector("#pocketDepthLabel").textContent = hasHiddenPockets && hasBottomPocket
-      ? "Hidden / bottom depth"
-      : hasHiddenPockets ? "Hidden pocket depth"
-      : hasBottomPocket ? "Bottom pocket depth" : "Bottom type";
-    document.querySelector("#pocketDepth").textContent = hasHiddenPockets && hasBottomPocket
-      ? `${measureFixed(result.manufacturing.hidden_finger_pocket_depth)} / ${measureFixed(result.manufacturing.pocket_depth)}`
-      : hasHiddenPockets ? measureFixed(result.manufacturing.hidden_finger_pocket_depth)
-      : hasBottomPocket
-        ? measureFixed(result.manufacturing.pocket_depth)
-        : bottomTypeLabels[spec.bottom_type];
+    const pocketDepths = [
+      result.manufacturing.hidden_finger_pocket_depth > 0
+        ? ["Hidden", result.manufacturing.hidden_finger_pocket_depth] : null,
+      result.manufacturing.has_bottom_pocket
+        ? ["Bottom", result.manufacturing.bottom_pocket_depth] : null,
+      result.manufacturing.has_top_pocket
+        ? ["Top", result.manufacturing.top_pocket_depth] : null,
+    ].filter(Boolean);
+    document.querySelector("#pocketDepthLabel").textContent = pocketDepths.length > 1
+      ? "Pocket depths"
+      : pocketDepths.length ? `${pocketDepths[0][0]} pocket depth` : "Panel types";
+    document.querySelector("#pocketDepth").textContent = pocketDepths.length
+      ? pocketDepths.map(([, depth]) => measureFixed(depth)).join(" / ")
+      : `${bottomTypeLabels[spec.bottom_type]} / ${topTypeLabels[spec.top_type]}`;
     document.querySelector("#dogboneSize").textContent = result.manufacturing.dogbones_enabled
       ? measure(result.manufacturing.dogbone_diameter)
       : "Off";
@@ -1393,6 +1455,8 @@ function drawDrawing() {
     CUT_OUTSIDE: { color: "#e9ede5", width: 1.05, dash: [] },
     POCKET_BOTTOM_SLOT: { color: "#72d8d3", width: 1, dash: [5, 3] },
     POCKET_BOTTOM_INSET: { color: "#72d8d3", width: 1, dash: [5, 3] },
+    POCKET_TOP_SLOT: { color: "#72d8d3", width: 1, dash: [5, 3] },
+    POCKET_TOP_INSET: { color: "#72d8d3", width: 1, dash: [5, 3] },
     POCKET_HIDDEN_FINGERS: { color: "#72d8d3", width: 1, dash: [5, 3] },
     MITER_END: { color: "#f1b65c", width: 1, dash: [6, 3] },
     ANNOTATION: { color: "#748073", width: 1, dash: [] },
@@ -1629,10 +1693,12 @@ dxfSettingsFile.addEventListener("change", async () => {
     dogboneCheckbox.checked = imported.useDogbones;
     wallConnectionSelect.value = imported.wallConnection;
     bottomTypeSelect.value = imported.bottomType;
+    topTypeSelect.value = imported.topType;
     dimensionBasisSelect.value = imported.dimensionBasis;
     updateDimensionBasisControls();
     updateWallConnectionControls();
     updateBottomTypeControls();
+    updateTopTypeControls();
     spec = readSpec();
     await updateGeometry(`Settings loaded from ${file.name}`);
   } catch (error) {
@@ -1656,6 +1722,10 @@ bottomTypeSelect.addEventListener("change", () => {
   updateBottomTypeControls();
   scheduleUpdate();
 });
+topTypeSelect.addEventListener("change", () => {
+  updateTopTypeControls();
+  scheduleUpdate();
+});
 pieceCheckboxes.forEach((checkbox) => checkbox.addEventListener("change", () => {
   updatePieceDrawingCount();
   drawModel();
@@ -1672,6 +1742,7 @@ new ResizeObserver(() => {
 }).observe(document.querySelector(".workspace"));
 
 updateBottomTypeControls();
+updateTopTypeControls();
 updateWallConnectionControls();
 updateDimensionBasisControls();
 updateGeometry();
